@@ -1,0 +1,95 @@
+# WELLOOP PR → Discord 알림
+#
+# 보내는 알림 3가지
+#   1. 리뷰 요청      → 리뷰어를 @멘션
+#   2. 리뷰 완료      → PR 작성자를 @멘션 (승인 / 수정 요청 / 코멘트)
+#   3. PR 머지        → 채널에 공지 (멘션 없음)
+#
+# 필요한 설정 (Settings → Secrets and variables → Actions)
+#   Secrets   DISCORD_WEBHOOK  : 디스코드 웹훅 URL (끝에 /github 붙이지 않음)
+#   Variables DISCORD_ID_MAP   : {"github아이디": "디스코드ID", ...} 형식의 JSON
+
+name: PR → Discord
+
+on:
+  pull_request:
+    types: [review_requested, closed]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # 머지 없이 닫힌 PR은 알리지 않음
+    if: >-
+      github.event_name == 'pull_request_review' ||
+      github.event.action == 'review_requested' ||
+      (github.event.action == 'closed' && github.event.pull_request.merged == true)
+    steps:
+      - name: Send to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          ID_MAP: ${{ vars.DISCORD_ID_MAP }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          ACTOR: ${{ github.actor }}
+          REVIEWER: ${{ github.event.requested_reviewer.login }}
+          TEAM: ${{ github.event.requested_team.name }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEW_URL: ${{ github.event.review.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK 시크릿이 없어 알림을 건너뜁니다."
+            exit 0
+          fi
+
+          # GitHub 아이디 → 디스코드 멘션 (없으면 아이디 그대로)
+          mention() {
+            local did
+            did=$(printf '%s' "$ID_MAP" | jq -r --arg u "$1" '.[$u] // empty' 2>/dev/null)
+            if [ -n "$did" ]; then echo "<@$did>"; else echo "$1"; fi
+          }
+
+          LINK="$PR_URL"
+
+          if [ "$EVENT" = "pull_request" ] && [ "$ACTION" = "review_requested" ]; then
+            if [ -n "$REVIEWER" ]; then TARGET=$(mention "$REVIEWER"); else TARGET="@${TEAM} 팀"; fi
+            CONTENT="$TARGET 리뷰 요청이 왔어요!"
+            DESC="$ACTOR 님이 리뷰를 요청했어요"
+            COLOR=16753920   # 주황
+
+          elif [ "$EVENT" = "pull_request_review" ]; then
+            # 작성자가 자기 PR에 단 코멘트는 알리지 않음
+            if [ "$ACTOR" = "$AUTHOR" ]; then
+              echo "작성자 본인 리뷰라 건너뜁니다."
+              exit 0
+            fi
+            TARGET=$(mention "$AUTHOR")
+            case "$REVIEW_STATE" in
+              approved)          CONTENT="$TARGET PR이 승인됐어요! ✅";        COLOR=5763719 ;;   # 초록
+              changes_requested) CONTENT="$TARGET 수정 요청이 왔어요 ✏️";       COLOR=15548997 ;;  # 빨강
+              *)                 CONTENT="$TARGET 리뷰 코멘트가 달렸어요 💬";   COLOR=3447003 ;;   # 파랑
+            esac
+            DESC="$ACTOR 님이 리뷰를 남겼어요"
+            [ -n "$REVIEW_URL" ] && LINK="$REVIEW_URL"
+
+          else
+            CONTENT=""
+            DESC="$AUTHOR 님의 PR이 \`$BASE\`에 머지됐어요 🎉"
+            COLOR=10181046   # 보라
+          fi
+
+          jq -n \
+            --arg c "$CONTENT" \
+            --arg t "🔁 #$PR_NUM $PR_TITLE" \
+            --arg d "$DESC" \
+            --arg u "$LINK" \
+            --argjson color "$COLOR" \
+            '{content:$c, allowed_mentions:{parse:["users"]},
+              embeds:[{title:$t, description:$d, url:$u, color:$color}]}' \
+          | curl -sS --fail -H "Content-Type: application/json" -d @- "$WEBHOOK"
