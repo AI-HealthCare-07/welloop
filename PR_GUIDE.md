@@ -30,9 +30,6 @@
 | 50자 안쪽, 마침표 없이 써요 | `refactor: 위험도 계산 로직 서비스로 분리` | `refactor: 코드 정리했습니다.` |
 | 요약은 한글로 써요 | `docs: 11/17 회의록` | `docs: add meeting notes` |
 
-- 영역을 구분하고 싶으면 괄호로 붙여요. 예: `feat(ai): 고혈압 위험도 모델 추가`
-- 영역 약어는 브랜치 규칙과 같아요: `be` 백엔드 · `ai` AI · `fe` 프론트 · `infra` 배포
-
 ## 2. PR 본문
 
 PR을 만들면 [템플릿](.github/pull_request_template.md)이 자동으로 채워져요. 항목을 지우지 말고 채워 주세요.
@@ -103,12 +100,12 @@ Closes #8
 REQ-004
 
 ## 작업 내용
-- `POST /api/v1/surveys` 문진표 저장 API 추가
-- 나이·성별·폐경 여부·흡연·음주 입력값 검증 (Pydantic)
-- 문진표 테이블 모델 추가
+- `POST /api/v1/questionnaires` 문진표 저장 API 추가
+- 폐경 여부·흡연·음주 입력값 검증 (Pydantic), 나이·성별은 가입 정보에서 가져옴
+- `questionnaires` 테이블 모델 추가
 
 ## 결과 확인
-요청 `{"age": 52, "sex": "F", "menopause": true, "smoking": false}` → 응답 `201 Created`
+요청 `{"menopause": true, "smoking": false}` → 응답 `201 Created`
 
 ## 체크리스트 (dev 대상 PR)
 **공통 필수**
