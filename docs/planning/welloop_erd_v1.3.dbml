@@ -1,0 +1,454 @@
+// WELLOOP ERD v1.3 — 요구사항 정의서 v1.3 기준 (11/17 중간회의 반영)
+// v1.3: 프로그램 테이블 삭제(user_programs·program_challenges), 추천 카테고리(user_categories), 함께 관리 그룹(family_groups·group_members·share_settings·family_messages) 추가
+// 원본(팀 초안) 형식 유지: enum + 한글 note, indexes로 PK 지정
+// 변경 요약: char(1) → bool, 체중·허리둘레 → decimal, 검진 항목 정리(간 수치 등 삭제),
+//          예측은 문진(questionnaires)에 연결 (v1.2 변경 내용)
+
+// ===== Enums =====
+
+enum Gender {
+  MALE [note: '남성']
+  FEMALE [note: '여성']
+}
+
+enum Role {
+  USER [note: '일반 회원']
+  ADMIN [note: '관리자']
+}
+
+enum Font_size {
+  NORMAL [note: '보통']
+  BIG [note: '크게 (65세 이상 자동 적용)']
+}
+
+enum Consent_type {
+  HEALTH_DATA [note: '건강정보(민감정보) 수집']
+  FAMILY_SHARE [note: '함께 관리 그룹 공유']
+  NOTIFICATION [note: '알림 수신']
+}
+
+enum Smoking_status {
+  NEVER [note: '비흡연']
+  FORMER [note: '과거 흡연']
+  CURRENT [note: '현재 흡연']
+}
+
+enum Yes_no_unknown {
+  YES [note: '예']
+  NO [note: '아니오']
+  UNKNOWN [note: '잘 모르겠어요']
+}
+
+enum Menopause_status {
+  PRE [note: '폐경 전']
+  PERI [note: '진행 중']
+  POST [note: '폐경 후']
+}
+
+enum Disease_type {
+  HYPERTENSION [note: '고혈압']
+  DIABETES [note: '당뇨']
+  DYSLIPIDEMIA [note: '이상지질혈증']
+}
+
+enum Risk_level {
+  LOW [note: '낮음']
+  WARNING [note: '주의']
+  HIGH [note: '높음']
+}
+
+enum Challenge_category {
+  DIET [note: '식습관']
+  ACTIVITY [note: '신체활동']
+  SLEEP_REST [note: '수면·휴식']
+  SMOKE_DRINK [note: '금연·절주']
+}
+
+enum Relation {
+  SPOUSE [note: '부부·커플']
+  PARENT_CHILD [note: '부모·자녀 (성인)']
+  FAMILY [note: '가족']
+}
+
+enum Member_status {
+  INVITED [note: '초대됨']
+  ACCEPTED [note: '연결됨']
+  LEFT [note: '연결 끊음']
+}
+
+enum Tone {
+  WARM [note: '다정하게']
+  PLAIN [note: '담백하게']
+  LIGHT [note: '가볍게']
+}
+
+enum Intensity {
+  LIGHT [note: '가벼움 (운동 제한 시에도 가능)']
+  MODERATE [note: '보통']
+  HARD [note: '강함 (운동 제한 시 제외)']
+}
+
+// ===== 회원 =====
+
+Table users {
+  user_id bigint [not null, note: 'users TBL id']
+  email varchar [unique, not null, note: '이메일']
+  password varchar [not null, note: '비밀번호 (bcrypt 해시)']
+  name varchar [note: '이름']
+  birth_date date [not null, note: '생년월일 (나이는 여기서 계산)']
+  gender Gender [not null, note: '성별']
+  role Role [not null, default: 'USER', note: '역할 (REQ-030)']
+  font_size Font_size [not null, default: 'NORMAL', note: '글자 크기']
+  failed_login_count integer [not null, default: 0, note: '로그인 연속 실패 횟수']
+  locked_until timestamp [note: '잠금 해제 시각 (5회 실패 시 10분, REQ-002)']
+  is_deleted bool [not null, default: false, note: '탈퇴 여부 (건강 데이터는 실제 삭제, NFR-005)']
+  created_at timestamp [not null, note: '가입 날짜']
+  updated_at timestamp [note: '수정 날짜']
+
+  indexes {
+    (user_id) [pk]
+  }
+}
+
+Table consents {
+  id bigint [not null, note: 'consents TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  consent_type Consent_type [not null, note: '동의 종류']
+  version varchar [not null, note: '약관 버전']
+  agreed bool [not null, note: '동의 여부']
+  agreed_at timestamp [not null, note: '동의·철회 일시']
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+// ===== 문진·검진·기록 =====
+
+Table questionnaires {
+  id bigint [not null, note: 'questionnaires TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  // ① 기본 정보 (나이·성별은 users에서)
+  height decimal(4,1) [note: '키 cm']
+  weight decimal(4,1) [note: '몸무게 kg']
+  waist_size decimal(4,1) [note: '허리둘레 cm']
+  htn_diagnosed bool [note: '고혈압 진단 여부 (예측 입력 X, 관리 중 분기용)']
+  htn_medication bool [note: '고혈압 약 복용']
+  dm_diagnosed bool [note: '당뇨 진단 여부']
+  dm_medication bool [note: '당뇨 약·인슐린']
+  dl_diagnosed bool [note: '이상지질혈증 진단 여부']
+  dl_medication bool [note: '이상지질혈증 약']
+  // ② 생활습관
+  smoking_status Smoking_status [note: '흡연 상태']
+  quit_intention bool [note: '금연 의향 (현재 흡연자만)']
+  drinking_days_per_week integer [note: '음주 빈도 (주 며칠)']
+  drinks_per_occasion integer [note: '1회 음주량 (잔)']
+  activity_days_per_week integer [note: '신체활동 주 며칠']
+  activity_minutes_per_day integer [note: '신체활동 하루 몇 분']
+  strength_days_per_week integer [note: '근력운동 주 며칠 (모델 입력)']
+  salty_food_freq integer [note: '짠 음식 빈도 (추천용)']
+  sweet_food_freq integer [note: '단 음식 빈도 (추천용)']
+  refined_carb_freq integer [note: '정제 탄수화물 빈도 (추천용)']
+  veg_freq integer [note: '채소 섭취 빈도 (모델 입력)']
+  fruit_freq integer [note: '과일 섭취 빈도 (모델 입력)']
+  breakfast_freq integer [note: '아침식사 빈도 (모델 입력)']
+  sleep_hours decimal(3,1) [note: '평균 수면 시간']
+  sleep_trouble bool [note: '수면 불편 여부']
+  // ③ 위험 요인
+  family_htn Yes_no_unknown [note: '가족력: 고혈압']
+  family_dm Yes_no_unknown [note: '가족력: 당뇨']
+  family_dl Yes_no_unknown [note: '가족력: 이상지질혈증']
+  exercise_restricted bool [note: '의사의 운동 제한 여부']
+  discomfort_symptoms varchar [note: '불편 증상 (가슴 통증·관절 통증 등)']
+  // ④ 맞춤 설정
+  improvement_goal varchar [note: '생활습관 개선 목표']
+  menopause_status Menopause_status [note: '폐경 상태 (여성만)']
+  is_completed bool [not null, default: false, note: '작성 완료 여부 (중간 저장)']
+  is_recheck bool [not null, default: false, note: '2주마다 1분 재문진 여부 (REQ-007)']
+  created_at timestamp [not null, note: '작성 날짜']
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table checkup_records {
+  id bigint [not null, note: 'checkup_records TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  checkup_date date [note: '검진 받은 날 (1년 넘으면 재검진 안내)']
+  pressure_systolic integer [note: '수축기 혈압']
+  pressure_diastolic integer [note: '이완기 혈압']
+  fasting_glucose integer [note: '공복혈당 mg/dL']
+  hba1c decimal(3,1) [note: '당화혈색소 %']
+  total_cholesterol integer [note: '총 콜레스테롤']
+  ldl_cholesterol integer [note: 'LDL 콜레스테롤']
+  hdl_cholesterol integer [note: 'HDL 콜레스테롤']
+  triglycerides integer [note: '중성지방']
+  created_at timestamp [not null, note: '입력 날짜']
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table health_logs {
+  id bigint [not null, note: 'health_logs TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  log_date date [not null, note: '기록일 (하루 여러 번이면 마지막 값 사용)']
+  weight decimal(4,1) [note: '체중 kg (매일)']
+  waist_size decimal(4,1) [note: '허리둘레 cm (주 1회 권장)']
+  pressure_systolic integer [note: '수축기 혈압 (혈압계 있으면)']
+  pressure_diastolic integer [note: '이완기 혈압']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+    (user_id, log_date)
+  }
+}
+
+// ===== 예측 =====
+
+Table risk_predictions {
+  id bigint [not null, note: 'risk_predictions TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  questionnaire_id bigint [not null, note: '예측에 쓴 문진 id (검진 X — 라벨 누수 방지)']
+  disease_type Disease_type [not null, note: '질환']
+  model_version varchar [not null, note: '모델 버전 (예: htn-lgbm-v1)']
+  risk_score decimal(5,4) [note: '위험 확률 0~1 (관리 중이면 null)']
+  risk_level Risk_level [note: '위험도 단계 (관리 중이면 null)']
+  is_managed bool [not null, default: false, note: '기진단 → 재예측 X, 생활습관 관리 평가(REQ-035)로']
+  major_factor1 varchar [note: '주요 원인1']
+  major_factor2 varchar [note: '주요 원인2']
+  major_factor3 varchar [note: '주요 원인3']
+  input_snapshot json [note: '계산에 쓴 입력값 사본 (REQ-007)']
+  created_at timestamp [not null, note: '예측 날짜 (하루 최대 1회)']
+
+  indexes {
+    (id) [pk]
+    (user_id, disease_type, created_at)
+  }
+}
+
+// ===== 추천·챌린지 =====
+
+Table user_categories {
+  user_id bigint [not null, note: '사용자 id']
+  category Challenge_category [not null, note: '추천·선택된 생활습관 카테고리']
+  priority integer [note: '추천 우선순위 (1이 가장 필요)']
+  is_active bool [not null, default: true, note: '사용자가 켜고 끔']
+  created_at timestamp [not null]
+  updated_at timestamp
+
+  indexes {
+    (user_id, category) [pk]
+  }
+}
+
+Table challenges {
+  challenge_id bigint [not null, note: 'challenges TBL id']
+  category Challenge_category [not null, note: '생활습관 카테고리']
+  content varchar [not null, note: '챌린지 내용']
+  intensity Intensity [not null, note: '강도']
+  is_active bool [not null, default: true, note: '관리자 비활성화용 (REQ-031)']
+  created_at timestamp [not null]
+  updated_at timestamp
+
+  indexes {
+    (challenge_id) [pk]
+  }
+}
+
+Table daily_challenges {
+  id bigint [not null, note: 'daily_challenges TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  challenge_id bigint [not null, note: '챌린지 id']
+  assigned_date date [not null, note: '배정 날짜 (하루 최대 3개)']
+  is_completed bool [not null, default: false, note: '완료 여부']
+  completed_at timestamp [note: '완료 시각']
+
+  indexes {
+    (id) [pk]
+    (user_id, assigned_date, challenge_id) [unique]
+  }
+}
+
+// ===== 체크인·마음 돌봄 =====
+
+Table checkins {
+  id bigint [not null, note: 'checkins TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  checkin_date date [not null, note: '날짜']
+  sleep_hours decimal(3,1) [note: '수면 시간 (REQ-013)']
+  mood integer [note: '기분 1~5 (나쁨 7일 중 5일 → 상담 안내)']
+  refreshed integer [note: '개운함 1~5']
+  stress integer [note: '스트레스 1~5 (선택, REQ-034)']
+  memo text [note: '감정 메모 (선택) — LLM에 전달 X, 키워드 검사만']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+    (user_id, checkin_date) [unique]
+  }
+}
+
+Table sos_logs {
+  id bigint [not null, note: 'sos_logs TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  situation varchar [note: '상황 (스트레스·식후 등)']
+  held_on bool [note: '버텼는지']
+  started_at timestamp [not null, note: 'SOS 시작 시각']
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table symptom_scores {
+  id bigint [not null, note: 'symptom_scores TBL id']
+  user_id bigint [not null, note: '사용자 id (여성, 갱년기 프로그램)']
+  total_score integer [not null, note: 'MRS 총점']
+  answers json [note: '11문항 응답']
+  created_at timestamp [not null, note: '기록일 (4주마다)']
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+// ===== AI 코치 =====
+
+Table coach_messages {
+  id bigint [not null, note: 'coach_messages TBL id']
+  user_id bigint [not null, note: '사용자 id']
+  message_date date [not null, note: '날짜 (하루 1회 생성 후 재사용)']
+  message_content text [not null, note: '메시지 내용']
+  model_name varchar [note: 'LLM 모델명']
+  tokens_used integer [note: '토큰 사용량 (REQ-033 집계용)']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+    (user_id, message_date) [unique]
+  }
+}
+
+// ===== 함께 관리 그룹 (REQ-017·036, NFR-017) =====
+
+Table family_groups {
+  id bigint [not null, note: 'family_groups TBL id']
+  name varchar [not null, note: '그룹 이름 (직접 지정)']
+  relation Relation [not null, note: '관계']
+  created_by bigint [not null, note: '만든 사용자 id']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table group_members {
+  group_id bigint [not null, note: '그룹 id']
+  user_id bigint [not null, note: '사용자 id (성인만)']
+  status Member_status [not null, note: '초대·연결·끊음']
+  joined_at timestamp [note: '동의하고 연결된 시각']
+
+  indexes {
+    (group_id, user_id) [pk]
+  }
+}
+
+Table share_settings {
+  group_id bigint [not null, note: '그룹 id']
+  user_id bigint [not null, note: '공유하는 사람']
+  share_condition bool [not null, default: true, note: '오늘의 상태 칩 공유']
+  share_challenge bool [not null, default: false, note: '챌린지 달성 공유']
+  share_trend bool [not null, default: false, note: '기록 추이(수치 없이 좋아짐·유지) 공유']
+  updated_at timestamp
+  Note: '메모·대화 원문·위험 신호는 공유 항목 자체가 없음 (NFR-017)'
+
+  indexes {
+    (group_id, user_id) [pk]
+  }
+}
+
+Table family_messages {
+  id bigint [not null, note: 'family_messages TBL id']
+  group_id bigint [not null, note: '그룹 id']
+  sender_id bigint [not null, note: '보낸 사람']
+  tone Tone [not null, note: '말투']
+  content varchar [not null, note: '본인이 고른 문구 (LLM 후보 중 선택, 금지어 검사 후)']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+// ===== 관리자 =====
+
+Table safety_keywords {
+  id bigint [not null, note: 'safety_keywords TBL id']
+  keyword varchar [unique, not null, note: '금지어·위험 키워드']
+  kind varchar [not null, note: '종류 (의료 표현 금지 / 위험 신호 / 가족 문구 금지)']
+  is_active bool [not null, default: true]
+  updated_by bigint [note: '수정한 관리자 id']
+  updated_at timestamp
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table admin_logs {
+  id bigint [not null, note: 'admin_logs TBL id']
+  admin_id bigint [not null, note: '관리자 id']
+  action varchar [not null, note: '작업 (챌린지 수정 등)']
+  target varchar [note: '대상 테이블·id']
+  created_at timestamp [not null]
+
+  indexes {
+    (id) [pk]
+  }
+}
+
+Table risk_thresholds {
+  id bigint [not null, note: 'risk_thresholds TBL id']
+  disease_type Disease_type [not null, note: '질환']
+  warning_from decimal(5,4) [not null, note: '주의 시작 확률']
+  high_from decimal(5,4) [not null, note: '높음 시작 확률']
+  model_version varchar [not null, note: '적용 모델 버전']
+  updated_by bigint [note: '수정한 관리자 id']
+  updated_at timestamp
+
+  indexes {
+    (id) [pk]
+  }
+  Note: '위험도 단계 경계값 (REQ-032, 관리자 설정)'
+}
+
+// ===== 관계 =====
+
+Ref: users.user_id < consents.user_id
+Ref: users.user_id < questionnaires.user_id
+Ref: users.user_id < checkup_records.user_id
+Ref: users.user_id < health_logs.user_id
+Ref: users.user_id < risk_predictions.user_id
+Ref: questionnaires.id < risk_predictions.questionnaire_id
+Ref: users.user_id < user_categories.user_id
+Ref: users.user_id < daily_challenges.user_id
+Ref: challenges.challenge_id < daily_challenges.challenge_id
+Ref: users.user_id < checkins.user_id
+Ref: users.user_id < sos_logs.user_id
+Ref: users.user_id < symptom_scores.user_id
+Ref: users.user_id < coach_messages.user_id
+Ref: users.user_id < safety_keywords.updated_by
+Ref: users.user_id < admin_logs.admin_id
+Ref: users.user_id < risk_thresholds.updated_by
+Ref: users.user_id < family_groups.created_by
+Ref: family_groups.id < group_members.group_id
+Ref: users.user_id < group_members.user_id
+Ref: family_groups.id < share_settings.group_id
+Ref: users.user_id < share_settings.user_id
+Ref: family_groups.id < family_messages.group_id
+Ref: users.user_id < family_messages.sender_id
