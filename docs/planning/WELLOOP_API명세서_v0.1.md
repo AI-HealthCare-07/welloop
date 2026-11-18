@@ -743,137 +743,261 @@
 <!-- 04 START · 홈·챌린지 · 담당: ______ -->
 ## 04. 홈·챌린지 (카테고리·미션·체크인·복약)
 
-담당: ______ · 관련 화면: D01~D07
+- 담당: 홍시윤
+- 관련 화면: D01~D07
+- 관련 요구사항: REQ-009~013, REQ-024, REQ-028
+- 우선순위: MVP (날씨 맞춤 기능은 추가)
+- 관련 테이블: `user_categories`, `challenges`, `daily_challenges`, `checkins` 등
+- 기준: 요구사항 정의서 v1.3 · ERD v1.3 · 와이어프레임
+
+> **공통 확인 사항**
+> - 카테고리 4개의 최종 명칭과 `category_code`는 확정 전입니다.
+> - 개인화 추천 조건 및 미션 생성 방식은 팀 협의가 필요합니다.
+> - 아래 JSON의 값은 개발 협의를 위한 예시(Mock Data)입니다.
+> - ERD 컬럼과 일치 여부를 최종 확인해야 합니다.
 
 ### 12. 켜진 생활습관 카테고리 조회
-- Method / Endpoint: `GET /api/v1/users/me/categories`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- **Method / Endpoint:** `GET /api/v1/users/me/categories`
+- **Description:** 로그인한 사용자가 활성화한 생활습관 카테고리 목록을 조회합니다.
+- **인증:** 필요
+- **Request Header:** `Authorization: Bearer {access_token}`
+- **Request Parameter:** 없음
+- **Request Body:** 없음
 
-  ```json
-  {
-    "categories": [
-      {
-        "category_code": "exercise",
-        "enabled": true
-      },
-      {
-        "category_code": "diet",
-        "enabled": true
-      },
-      {
-        "category_code": "sleep",
-        "enabled": false
-      },
-      {
-        "category_code": "smoking",
-        "enabled": false
-      }
-    ]
-  }
-  ```
-- Status Code: 성공: 200 OK / 401 토큰 없음·만료
-- 관련 테이블 · REQ: user_categories · REQ-010
-- 우선순위: MVP
-- 비고: category_code 4개 값은 기획 확정값으로 교체 (예시임)
+**Response Body (200 OK)**
+
+```json
+{
+  "categories": [
+    {
+      "category_code": "diet",
+      "enabled": true
+    },
+    {
+      "category_code": "exercise",
+      "enabled": true
+    },
+    {
+      "category_code": "sleep",
+      "enabled": false
+    },
+    {
+      "category_code": "smoking",
+      "enabled": false
+    }
+  ]
+}
+```
+
+**Status Code**
+
+| 코드 | 설명 |
+|---|---|
+| 200 | 카테고리 조회 성공 |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 500 | 서버 내부 오류 |
+
+- **관련 테이블:** `user_categories`
+- **관련 요구사항:** REQ-010
+- **관련 화면:** D02
+
+**비고**
+- 카테고리 코드는 기존 API 초안의 예시를 유지했습니다.
+- 현재 와이어프레임에는 식습관·움직임·수면·마음으로 표시되어 있어 최종 분류를 통일해야 합니다.
+- 신규 사용자의 기본 활성화 상태를 정의해야 합니다.
+- 활성화 상태와 AI 추천 우선순위를 별도로 관리할지 확인이 필요합니다.
 
 ### 13. 카테고리 켜기/끄기 저장
-- Method / Endpoint: `PUT /api/v1/users/me/categories`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body:
+- **Method / Endpoint:** `PUT /api/v1/users/me/categories`
+- **Description:** 사용자가 선택한 생활습관 카테고리의 활성화 상태를 저장합니다.
+- **인증:** 필요
+- **Request Header:**
+  - `Content-Type: application/json`
+  - `Authorization: Bearer {access_token}`
+- **Request Parameter:** 없음
 
-  ```json
-  {
-    "categories": [
-      {
-        "category_code": "exercise",
-        "enabled": true
-      },
-      {
-        "category_code": "sleep",
-        "enabled": true
-      }
-    ]
-  }
-  ```
-- Response Body (성공 예시 = Mock Data):
+**Request Body**
 
-  ```json
-  {
-    "updated": 2
-  }
-  ```
-- Status Code: 성공: 200 OK / 400 알 수 없는 category_code / 401 토큰 없음·만료
-- 관련 테이블 · REQ: user_categories · REQ-010
-- 우선순위: MVP
+```json
+{
+  "categories": [
+    {
+      "category_code": "exercise",
+      "enabled": true
+    },
+    {
+      "category_code": "sleep",
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Response Body (200 OK)**
+
+```json
+{
+  "updated": 2
+}
+```
+
+**Status Code**
+
+| 코드 | 설명 |
+|---|---|
+| 200 | 설정 저장 성공 |
+| 400 | 유효하지 않은 카테고리 코드 또는 입력값 |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 500 | 서버 내부 오류 |
+
+- **관련 테이블:** `user_categories`
+- **관련 요구사항:** REQ-010
+- **관련 화면:** D02
+
+**비고**
+- 기존 API 초안의 요청·응답 구조를 유지했습니다.
+- 요청에 포함된 카테고리만 변경할지, 전체 설정을 교체할지 결정해야 합니다.
+- 카테고리 비활성화 시 이미 배정된 미션을 유지할지 확인이 필요합니다.
+- 사용자 선택과 AI 추천 결과가 충돌할 경우 우선순위를 정해야 합니다.
 
 ### 14. 오늘의 미션 조회
-- Method / Endpoint: `GET /api/v1/challenges/today`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): date(선택, 기본 오늘)
-- Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- **Method / Endpoint:** `GET /api/v1/challenges/today`
+- **Description:** 로그인한 사용자에게 해당 날짜에 배정된 생활습관 미션과 수행 상태를 조회합니다.
+- **인증:** 필요
+- **Request Header:** `Authorization: Bearer {access_token}`
 
-  ```json
-  {
-    "date": "2026-11-18",
-    "missions": [
-      {
-        "daily_challenge_id": 21,
-        "challenge_id": 4,
-        "category_code": "exercise",
-        "title": "30분 걷기",
-        "completed": false
-      }
-    ]
-  }
-  ```
-- Status Code: 성공: 200 OK / 401 토큰 없음·만료
-- 관련 테이블 · REQ: daily_challenges · REQ-009·011
-- 우선순위: MVP
+**Request Parameter (Query)**
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| date | string (YYYY-MM-DD) | N | 조회 날짜, 기본값은 오늘 |
+
+**Response Body (200 OK)**
+
+```json
+{
+  "date": "2026-11-18",
+  "missions": [
+    {
+      "daily_challenge_id": 21,
+      "challenge_id": 4,
+      "category_code": "exercise",
+      "title": "30분 걷기",
+      "completed": false
+    },
+    {
+      "daily_challenge_id": 22,
+      "challenge_id": 7,
+      "category_code": "diet",
+      "title": "저녁 식사 후 야식 피하기",
+      "completed": true
+    }
+  ]
+}
+```
+
+**Status Code**
+
+| 코드 | 설명 |
+|---|---|
+| 200 | 오늘의 미션 조회 성공 |
+| 400 | 날짜 형식 오류 |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 500 | 서버 내부 오류 |
+
+- **관련 테이블:** `daily_challenges`, `challenges`, `checkins`
+- **관련 요구사항:** REQ-009, REQ-011
+- **관련 화면:** D01, D03
+
+**비고**
+- 기존 API 초안의 응답 필드를 유지했습니다.
+- 미션이 없는 경우 `missions: []`를 반환합니다.
+- 하루 최대 미션 개수는 확정이 필요합니다.
+- 같은 날짜에 여러 번 조회해도 미션이 중복 생성되지 않아야 합니다.
+- 미션을 자동 배정할지, 추천 목록에서 사용자가 선택하도록 할지 결정해야 합니다.
+- 미션 상세 설명·목표량·단위 등이 필요하다면 응답 필드 확장을 검토해야 합니다.
 
 ### 15. 미션·수면·기분·복약 체크인
-- Method / Endpoint: `POST /api/v1/checkins`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body:
+- **Method / Endpoint:** `POST /api/v1/checkins`
+- **Description:** 사용자의 일일 미션 수행 결과와 수면·기분·복약 기록을 저장합니다.
+- **인증:** 필요
+- **Request Header:**
+  - `Content-Type: application/json`
+  - `Authorization: Bearer {access_token}`
+- **Request Parameter:** 없음
 
-  ```json
-  {
-    "checkin_date": "2026-11-18",
-    "completed_daily_challenge_ids": [
-      21
-    ],
-    "sleep_hours": 6.5,
-    "mood_score": 4,
-    "medication_taken": true
-  }
-  ```
-- Response Body (성공 예시 = Mock Data):
+**Request Body**
 
-  ```json
-  {
-    "checkin_id": 15,
-    "completion_rate": 1.0,
-    "created_at": "2026-11-18T21:00:00+09:00"
-  }
-  ```
-- Status Code: 성공: 201 Created / 400 mood_score 범위(1~5) 오류 / 401 토큰 없음·만료 / 409 같은 날 체크인 중복
-- 관련 테이블 · REQ: checkins · REQ-012·013·024
-- 우선순위: MVP
-- 비고: 같은 날 재제출은 409 대신 PUT 덮어쓰기로 할지 팀 결정 필요
+```json
+{
+  "checkin_date": "2026-11-18",
+  "completed_daily_challenge_ids": [
+    21
+  ],
+  "sleep_hours": 6.5,
+  "mood_score": 4,
+  "medication_taken": true
+}
+```
+
+**Response Body (201 Created)**
+
+```json
+{
+  "checkin_id": 15,
+  "completion_rate": 0.5,
+  "created_at": "2026-11-18T21:00:00+09:00"
+}
+```
+
+**Status Code**
+
+| 코드 | 설명 |
+|---|---|
+| 201 | 체크인 저장 성공 |
+| 400 | 입력값 또는 허용 범위 오류 |
+| 401 | 인증 토큰 없음 또는 만료 |
+| 404 | 존재하지 않는 미션 |
+| 409 | 동일 날짜 체크인 중복 |
+| 500 | 서버 내부 오류 |
+
+- **관련 테이블:** `checkins`, `daily_challenges`
+- **관련 요구사항:** REQ-012, REQ-013, REQ-024
+- **관련 화면:** D01, D03, D04, D05
+
+**비고**
+- `mood_score` 허용 범위는 1~5로 가정했습니다.
+- `completion_rate`는 해당 날짜에 배정된 미션 중 완료된 미션의 비율입니다.
+- 수면·기분·복약 기록을 모두 필수 입력으로 받을 필요는 없습니다.
+- 같은 날 체크인 수정이 가능하도록 별도 수정 API를 둘지 결정해야 합니다.
+- 복약 기록은 여러 약물을 복용하는 사용자까지 고려하면 `medication_taken: true/false`만으로는 부족할 수 있습니다.
+- 하나의 체크인 API로 모든 기록을 저장할지, 기능별로 분리할지 검토가 필요합니다.
+- 체크인한 미션이 실제 해당 사용자에게 배정된 미션인지 검증해야 합니다.
 
 #### ➕ 추가 검토 (뼈대·화면에는 있는데 초안에 없는 API)
-- [ ] GET /api/v1/challenges/recommended — 맞춤 챌린지 추천 (D02, REQ-009)
+- [ ] GET /api/v1/challenges/recommended — 맞춤 챌린지 추천 (D02, REQ-009 · MVP 반영 검토)
+  - 사용자 문진 결과, 건강 상태, 활성화된 카테고리를 기반으로 챌린지 추천
+  - 추천 기준(기진단 여부, 질환별 위험도, 생활습관 등) 확정 필요
+  - 추천 결과를 DB에 저장할지, 요청 시 생성할지 결정 필요
+  - 추천 목록 조회와 실제 미션 배정 방식 구분 필요
+  
 - [ ] GET /api/v1/weather/mission — 날씨 맞춤 미션 조정 (D06, REQ-024 · 추가)
+  - 외부 날씨 API 연동 여부 및 지역정보 입력 방식 결정 필요
+  - 날씨에 따른 대체 미션 추천 기준 확정 필요
+  - 실제 미션 변경 또는 대체 미션 안내만 제공할지 결정 필요
 
+#### 04 구역 ERD·와이어프레임 대조 결과 · 팀 확인 요청
+| # | 내용 | 확인할 사람 |
+|---|---|---|
+| 1 | 카테고리 4개 명칭 및 `category_code` 불일치: API 예시(diet/exercise/sleep/smoking)와 와이어프레임(식습관/움직임/수면/마음) 통일 필요 | 기획 · 백엔드 |
+| 2 | 사용자 카테고리 선택과 건강 상태 기반 추천의 우선순위 확정 필요 | 기획 · AI |
+| 3 | 맞춤 챌린지 추천 API가 기존 38개 목록에 없음 → MVP 포함 여부 확인 | 팀장 · 백엔드 |
+| 4 | 하루 미션 개수 및 자동 배정·사용자 선택 방식 확정 필요 | 기획 |
+| 5 | 동일 날짜 체크인 재제출 시 409 반환 또는 PUT 수정 방식 결정 필요 | 백엔드 |
+| 6 | 수면·기분·복약 기록을 단일 체크인 API로 처리할지 확인 필요 | 백엔드 · 프론트엔드 |
+| 7 | 미션 상세 화면(D03)에 필요한 설명·목표량 등 응답 필드 및 상세 조회 API 검토 | 프론트엔드 · 백엔드 |
+| 8 | 날씨 맞춤 미션의 실제 변경 여부 및 외부 API 연동 범위 확정 필요 | 기획 · 백엔드 |
+| 9 | `user_categories`, `daily_challenges`, `checkins` 등 관련 테이블과 요청·응답 필드 일치 여부 확인 | 백엔드 |
 <!-- 04 END -->
 
 ---
