@@ -878,99 +878,406 @@
 
 ---
 
-<!-- 05 START · AI 코치·케어 · 담당: ______ -->
+<!-- 05 START · AI 코치·케어 · 담당: 전은지 -->
 ## 05. AI 코치·케어 (코치·SOS·갱년기·감정 메모)
 
-담당: ______ · 관련 화면: E01~E06
+담당: 전은지 · 관련 화면: E01~E06, D01(오늘의 코치 카드) · 관련 요구사항: REQ-014~016·021·022·034
 
-### 16. 흡연 욕구 SOS 기록
-- Method / Endpoint: `POST /api/v1/sos`
+> 05 구역 공통
+> - **`safety_alert` 공통 객체**: `{ "alert_id": 55, "alert_type": "medical_consult", "reason_code": "bp_over_threshold", "created_at": "2026-11-18T09:15:00+09:00" }` · `alert_type`: emergency(119) / medical_consult(진료 권고) / mental_crisis(109). 응답에 이 값이 있으면 프론트는 E02(21-2)를 띄운다. 다른 구역 API(문진·검진·예측·체크인·건강 기록)에도 같은 형식으로 넣어야 해서 → 02·03·04 참고
+> - **SSE 이벤트(21번)**: `meta`(대화 시작) → `token`(답변 조각) → `done`(종료·추천 행동) / `safety_alert`(위험 표현, LLM 미호출) / `error`(스트림 중 오류)
+> - 위험 판단은 LLM이 아니라 **서버 키워드·수치 규칙**으로 한다 (REQ-022). 동작 설명·대처 행동·제안 문구는 **고정 콘텐츠**로, LLM은 코치 말투만 만든다
+
+### 16. 흡연 욕구 SOS 시작 (5분 미루기) · 추가
+- Method / Endpoint: `POST /api/v1/care/sos`
+- Description: 충동 강도와 상황을 기록하고 5분 미루기 타이머·고정 대처 행동 3가지를 돌려준다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
+- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
+- Request Parameter: -
 - Request Body:
 
   ```json
   {
-    "craving_level": 8,
-    "memo": "식사 후 흡연 욕구"
+    "craving_level": 7,
+    "situation": "stress"
   }
   ```
-- Response Body (성공 예시 = Mock Data):
+- Response Body (201):
 
   ```json
   {
     "sos_id": 4,
-    "guide_message": "잠시 심호흡을 해 볼까요?",
+    "delay_minutes": 5,
+    "ends_at": "2026-11-18T13:25:00+09:00",
+    "tips": [
+      "담배가 있는 장소에서 잠시 벗어나요.",
+      "물을 천천히 마시거나 편안하게 호흡해요.",
+      "짧은 산책이나 다른 행동으로 관심을 돌려요."
+    ],
     "created_at": "2026-11-18T13:20:00+09:00"
   }
   ```
-- Status Code: 성공: 201 Created / 400 craving_level 범위(1~10) 오류 / 401 토큰 없음·만료
+- Status Code: 201 Created / 400 craving_level 범위(1~10)·situation 값 오류 / 401 토큰 없음·만료
 - 관련 테이블 · REQ: sos_logs · REQ-016
-- 우선순위: 추가
+- 관련 화면: E05
+- 비고: 초안의 `/api/v1/sos`를 옮김, memo 필드 제외(화면에 없음). situation(선택): stress / after_meal / boredom / drinking / other. tips는 고정 콘텐츠
 
-### 20. 오늘의 코치 메시지 (하루 1회 생성, 저장본 재사용)
+### 20. 오늘의 코치 메시지·추천 행동 (하루 1회 생성, 저장본 재사용) · MVP
 - Method / Endpoint: `GET /api/v1/coach/today`
+- Description: 사실 데이터(예측·기록)를 바탕으로 만든 오늘의 코치 메시지와 추천 행동을 돌려준다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `date` (선택, 기본 오늘)
 - Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- Response Body (200):
 
   ```json
   {
     "coach_message_id": 12,
     "date": "2026-11-18",
-    "message": "어제보다 걸음 수가 늘었어요. 오늘도 가볍게 걸어 볼까요?",
-    "sources": [
+    "message": "피곤함이 이어져 힘드셨겠어요. 오늘은 무리한 목표보다 잠드는 시간을 기록하고, 편안한 호흡부터 해 보면 어떨까요?",
+    "based_on": [
+      "sleep_hours_low",
+      "checkin_missed_2d"
+    ],
+    "recommended_actions": [
       {
-        "title": "고혈압 생활습관 권고"
+        "action_code": "breathing",
+        "title": "편안한 호흡 3분",
+        "target": "routine",
+        "target_id": 1
+      },
+      {
+        "action_code": "sleep_checkin",
+        "title": "수면 체크인",
+        "target": "checkin",
+        "target_id": null
       }
     ],
-    "safety_notice": null,
+    "source": "llm",
+    "safety_alert": null,
+    "disclaimer": "AI 코치는 진단·처방·응급 상담을 제공하지 않아요.",
     "generated_at": "2026-11-18T07:00:00+09:00"
   }
   ```
-- Status Code: 성공: 200 OK / 401 토큰 없음·만료 / 409 AI 처리 동의 없음 / 503 LLM 호출 실패(저장본 없을 때)
-- 관련 테이블 · REQ: coach_messages · REQ-021, NFR-007
-- 우선순위: MVP
-- 비고: 근거 문서 부족 시 답 보류(“의료진과 상의” 안내) — v1.4 후보 REQ-021
+- Status Code: 200 OK / 401 토큰 없음·만료 / 409 AI 처리 동의 없음(CONSENT_REQUIRED) · ※ LLM 실패·생성 전이어도 503 대신 규칙 기반 기본 문구로 200 (`source: "rule"`)
+- 관련 테이블 · REQ: coach_messages · daily_challenges · checkins · REQ-021, NFR-001·007·010·014
+- 관련 화면: D01, E01
+- 비고: 새벽 배치로 AI 워커가 미리 생성 → 없으면 규칙 문구를 바로 반환하고 백그라운드 생성(P95 3초). `based_on` = LLM에 넘긴 사실 데이터 키(수치 원문 X). `target`: routine / checkin / menopause / sos / emotion_note / challenge. 위험 상태면 일반 코칭 대신 `safety_alert`와 고정 안내만 반환
 
-### 21. AI 코치 실시간 대화 (SSE 스트리밍)
+### 21. AI 코치 대화 (SSE 스트리밍) · 추가
 - Method / Endpoint: `POST /api/v1/coach/chat`
+- Description: 사용자 메시지에 대한 코치 답변을 스트리밍으로 보낸다. 위험 표현이면 LLM을 부르지 않고 안내만 보낸다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token} / Accept: text/event-stream
-- Request Parameter (Path / Query): -
+- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`, `Accept: text/event-stream`
+- Request Parameter: -
 - Request Body:
 
   ```json
   {
-    "thread_id": "t-1",
-    "message": "오늘 운동 뭐가 좋을까요?"
+    "thread_id": null,
+    "message": "요즘 피곤하고 잠이 부족해요."
   }
   ```
-- Response Body (성공 예시 = Mock Data):
+- Response Body (200 · text/event-stream):
+
+  ```text
+  Content-Type: text/event-stream
+
+  event: meta
+  data: {"thread_id":"th_7f3a","message_id":101}
+
+  event: token
+  data: {"text":"피곤함이 이어져 "}
+
+  event: done
+  data: {"message_id":102,"recommended_actions":[{"action_code":"breathing","target":"routine","target_id":1}]}
+
+  (위험 표현 감지 시 · LLM 호출 없이)
+  event: safety_alert
+  data: {"alert_id":55,"alert_type":"mental_crisis"}
+
+  (스트림 중 오류)
+  event: error
+  data: {"code":"AI_UNAVAILABLE","message":"잠시 후 다시 시도해 주세요."}
+  ```
+- Status Code: 200 OK (스트림 시작) / 400 message 비어 있음·500자 초과 / 401 토큰 없음·만료 / 404 thread 없음(본인 대화 아님 포함) / 409 AI 처리 동의 없음 / 429 호출 한도 초과 · ※ 스트림 시작 후 오류는 상태 코드 대신 `event: error`
+- 관련 테이블 · REQ: coach_threads · coach_chat_messages(추가 제안) · safety_alerts · REQ-021·022, NFR-002·010
+- 관련 화면: E01
+- 비고: `thread_id`가 null이면 서버가 새 대화 생성(클라이언트 임의 id 금지). 입력을 먼저 서버 키워드 규칙으로 검사 → 위험이면 LLM 미호출. 최근 N턴만 LLM 전달, max_tokens 512. 와이어프레임 E01은 MVP라 범위 확인 필요
+
+### 21-1. 코치 대화 내역 조회 · 추가 (추가 제안)
+- Method / Endpoint: `GET /api/v1/coach/threads/{thread_id}/messages`
+- Description: 이전 대화를 이어서 보여 주거나, 응답 생성 중·재시도 상태를 복원한다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Path `thread_id` · Query `before_id`(선택), `size`(기본 20)
+- Request Body: -
+- Response Body (200):
 
   ```json
-  Content-Type: text/event-stream
-  
-  event: token
-  data: {"text":"가벼운 걷기부터"}
-  
-  event: done
-  data: {"thread_id":"t-1","sources":[{"title":"운동 권고"}]}
-  
-  (위험 신호 감지 시) event: safety_alert
-  data: {"message":"의료진 상담을 권해요"}
+  {
+    "thread_id": "th_7f3a",
+    "items": [
+      {
+        "message_id": 101,
+        "role": "user",
+        "content": "요즘 피곤하고 잠이 부족해요.",
+        "created_at": "2026-11-18T09:12:00+09:00"
+      },
+      {
+        "message_id": 102,
+        "role": "assistant",
+        "content": "피곤함이 이어져 힘드셨겠어요. …",
+        "created_at": "2026-11-18T09:12:04+09:00"
+      }
+    ],
+    "has_more": false
+  }
   ```
-- Status Code: 성공: 200 OK (스트림) / 400 message 비어 있음 / 401 토큰 없음·만료 / 409 AI 처리 동의 없음 / 429 호출 한도 초과 / 503 LLM 호출 실패
-- 관련 테이블 · REQ: NFR-002
-- 우선순위: 추가
-- 비고: thread_id는 사용자별 분리. LLM이 DB를 직접 조회하지 않고 백엔드 정해진 API로만 요약 전달
+- Status Code: 200 OK / 400 size 범위 오류 / 401 토큰 없음·만료 / 404 thread 없음(본인 대화 아님 포함)
+- 관련 테이블 · REQ: coach_chat_messages · REQ-021
+- 관련 화면: E01
+- 비고: 최신순 페이지네이션(`before_id`)
 
-#### ➕ 추가 검토 (뼈대·화면에는 있는데 초안에 없는 API)
-- [ ] POST·GET /api/v1/symptoms — 갱년기 증상 점수 (E04, REQ-015, symptom_scores)
-- [ ] POST·GET /api/v1/mood-notes — 감정 메모 (E06, REQ-034, ERD 테이블 확인 필요)
+### 21-2. 위험 신호 안내 내용 조회 · MVP (추가 제안)
+- Method / Endpoint: `GET /api/v1/safety/guides/{alert_type}`
+- Description: 안내 종류별 제목·행동 버튼·안내 문구를 돌려준다 (E02 화면 내용).
+- 인증: 불필요
+- Request Header: `Content-Type: application/json`
+- Request Parameter: Path `alert_type` (emergency | medical_consult | mental_crisis)
+- Request Body: -
+- Response Body (200):
+
+  ```json
+  {
+    "alert_type": "emergency",
+    "title": "지금은 안전 확인이 먼저예요",
+    "question": "갑작스러운 심한 흉통·호흡곤란, 의식 저하, 한쪽 마비가 있나요?",
+    "primary_action": {
+      "label": "119에 전화하기",
+      "type": "call",
+      "value": "119"
+    },
+    "guides": [
+      {
+        "heading": "즉시 할 수 있는 행동",
+        "items": [
+          "혼자 있으면 주변 사람에게 도움을 요청하세요.",
+          "직접 운전하지 말고 안내에 따라 도움을 받으세요."
+        ]
+      },
+      {
+        "heading": "응급 증상이 아니라면",
+        "items": [
+          "증상이 지속·악화되면 의료기관에 문의하세요."
+        ]
+      }
+    ],
+    "disclaimer": "이 안내는 증상만으로 상태를 확정하지 않습니다."
+  }
+  ```
+- Status Code: 200 OK / 404 알 수 없는 alert_type
+- 관련 테이블 · REQ: safety_guides(또는 서버 고정 설정) · REQ-022, NFR-014
+- 관련 화면: E02
+- 비고: 응급 안내는 로그인이 풀려도 열려야 해서 인증 불필요. mental_crisis = 자살예방 상담전화 109 안내, medical_consult = 의료기관 진료 권고. 문구 변경은 관리자 검토·승인 후 적용(F03)
+
+### 21-3. 호흡·스트레칭 콘텐츠 목록 · 추가 (추가 제안)
+- Method / Endpoint: `GET /api/v1/care/routines`
+- Description: 미리 만든 호흡·스트레칭 루틴 목록을 돌려준다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `type` (선택: breathing | stretching)
+- Request Body: -
+- Response Body (200):
+
+  ```json
+  {
+    "items": [
+      {
+        "routine_id": 1,
+        "type": "breathing",
+        "title": "편안한 호흡 3분",
+        "duration_sec": 180,
+        "steps": [
+          "코로 4초 들이마시고, 6초 천천히 내쉬어요.",
+          "숨을 참거나 억지로 깊게 쉬지 않아도 돼요."
+        ],
+        "caution": "불편하거나 어지러우면 멈추고 평소처럼 호흡해요.",
+        "seated": true
+      },
+      {
+        "routine_id": 4,
+        "type": "stretching",
+        "title": "어깨·목 가볍게 풀기",
+        "duration_sec": 300,
+        "steps": [
+          "어깨를 천천히 위아래로 5회 움직여요."
+        ],
+        "caution": "통증이 없는 범위에서 천천히 움직이세요.",
+        "seated": true
+      }
+    ]
+  }
+  ```
+- Status Code: 200 OK / 400 type 값 오류 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: care_routines(고정 콘텐츠) · REQ-014
+- 관련 화면: E03
+- 비고: 동작 설명은 미리 만든 고정 콘텐츠(LLM이 운동법을 만들지 않음). 문진에서 운동 제한 "예"인 사용자는 서버가 `seated: true`만 반환
+
+### 21-4. 갱년기 오늘의 상태 저장 (같은 날 덮어쓰기) · 추가 (추가 제안)
+- Method / Endpoint: `PUT /api/v1/care/menopause-logs/{log_date}`
+- Description: 오늘 느낀 변화와 불편한 정도를 저장하고 생활 관리 제안을 돌려준다.
+- 인증: 필요
+- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
+- Request Parameter: Path `log_date` (YYYY-MM-DD)
+- Request Body:
+
+  ```json
+  {
+    "symptoms": [
+      "sleep_discomfort"
+    ],
+    "severity": "moderate"
+  }
+  ```
+- Response Body (200):
+
+  ```json
+  {
+    "log_date": "2026-11-18",
+    "symptoms": [
+      "sleep_discomfort"
+    ],
+    "severity": "moderate",
+    "suggestions": [
+      "편안한 수면 환경을 준비해 보세요.",
+      "짧은 호흡·스트레칭으로 긴장을 풀어 보세요."
+    ],
+    "safety_alert": null,
+    "updated_at": "2026-11-18T21:30:00+09:00"
+  }
+  ```
+- Status Code: 200 OK (첫 저장·덮어쓰기 모두) / 400 값 오류 ("none"과 다른 증상 동시 선택 포함) / 401 토큰 없음·만료
+- 관련 테이블 · REQ: menopause_logs(symptom_scores 대체 제안) · REQ-015
+- 관련 화면: E04
+- 비고: `symptoms`: hot_flash / sleep_discomfort / mood_change / other / none, `severity`: mild / moderate / severe. 제안 문구는 고정 규칙. 화면(일일 기록)과 REQ-015(MRS 4주)가 달라 확인 필요
+
+### 21-5. 감정 메모 저장 · 추가 (추가 제안)
+- Method / Endpoint: `POST /api/v1/care/emotion-notes`
+- Description: 오늘의 감정과 짧은 메모를 나만 보기로 저장한다.
+- 인증: 필요
+- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
+- Request Parameter: -
+- Request Body:
+
+  ```json
+  {
+    "note_date": "2026-11-18",
+    "emotion": "tired",
+    "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요."
+  }
+  ```
+- Response Body (201):
+
+  ```json
+  {
+    "note_id": 17,
+    "note_date": "2026-11-18",
+    "emotion": "tired",
+    "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요.",
+    "visibility": "private",
+    "safety_alert": null,
+    "created_at": "2026-11-18T22:10:00+09:00"
+  }
+  ```
+- Status Code: 201 Created / 400 emotion 값 오류·memo 500자 초과 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: emotion_notes(추가 제안) · REQ-034·022, NFR-005·016
+- 관련 화면: E06
+- 비고: `emotion`: calm / tired / worried / happy, memo 선택(0~500자). 항상 나만 보기(가족 공유·관리자 조회 불가). memo는 서버 키워드 검사 → 위험 표현이면 `safety_alert`(mental_crisis). 임시 작성 내용은 프론트에서만 보관
+
+### 21-6. 감정 메모 목록 조회 · 추가 (추가 제안)
+- Method / Endpoint: `GET /api/v1/care/emotion-notes`
+- Description: 내 감정 메모를 기간별로 조회한다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `from_date`, `to_date`, `page`(기본 1), `size`(기본 10)
+- Request Body: -
+- Response Body (200):
+
+  ```json
+  {
+    "items": [
+      {
+        "note_id": 17,
+        "note_date": "2026-11-18",
+        "emotion": "tired",
+        "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요.",
+        "created_at": "2026-11-18T22:10:00+09:00"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "size": 10
+  }
+  ```
+- Status Code: 200 OK / 400 날짜 형식 오류 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: emotion_notes · REQ-034
+- 관련 화면: E06
+- 비고: 본인 메모만 조회
+
+### 21-7. 감정 메모 수정 · 추가 (추가 제안)
+- Method / Endpoint: `PATCH /api/v1/care/emotion-notes/{note_id}`
+- Description: 감정이나 메모 내용을 고친다.
+- 인증: 필요
+- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
+- Request Parameter: Path `note_id`
+- Request Body:
+
+  ```json
+  {
+    "emotion": "calm",
+    "memo": "산책하고 나니 마음이 편해졌어요."
+  }
+  ```
+- Response Body (200):
+
+  ```json
+  {
+    "note_id": 17,
+    "emotion": "calm",
+    "memo": "산책하고 나니 마음이 편해졌어요.",
+    "safety_alert": null,
+    "updated_at": "2026-11-18T22:30:00+09:00"
+  }
+  ```
+- Status Code: 200 OK / 400 값 오류·500자 초과 / 401 토큰 없음·만료 / 404 메모 없음(본인 것 아님 포함)
+- 관련 테이블 · REQ: emotion_notes · REQ-034
+- 관련 화면: E06
+- 비고: 바뀐 필드만 전달. 수정할 때도 키워드 검사
+
+### 21-8. 감정 메모 삭제 · 추가 (추가 제안)
+- Method / Endpoint: `DELETE /api/v1/care/emotion-notes/{note_id}`
+- Description: 감정 메모를 바로 삭제한다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Path `note_id`
+- Request Body: -
+- Response Body (204):
+
+  (본문 없음)
+- Status Code: 204 No Content / 401 토큰 없음·만료 / 404 메모 없음(본인 것 아님 포함)
+- 관련 테이블 · REQ: emotion_notes · REQ-034, NFR-005
+- 관련 화면: E06
+- 비고: 즉시 실제 삭제 (화면 안내: "언제든 수정·삭제할 수 있어요")
+
+#### ➕ 추가 검토 (화면에 없어 본문에서 뺀 API · 화면이 추가되면 본문으로 옮김)
+- [ ] PATCH /api/v1/care/sos/{sos_id} — 흡연 욕구 SOS 결과 기록 (버텼어요/피웠어요) (E05, REQ-016)
+- [ ] GET /api/v1/care/sos/summary — 흡연 욕구 패턴 요약 (E05, REQ-016)
+- [ ] PUT /api/v1/coach/messages/{coach_message_id}/feedback — 코치 메시지 피드백 👍/👎 (E01, NFR-008)
+- [ ] PATCH /api/v1/safety/alerts/{alert_id} — 위험 신호 안내 확인·행동 기록 (E02, REQ-022·033)
+- [ ] POST /api/v1/care/routines/{routine_id}/sessions — 호흡·스트레칭 완료·중단 기록 (E03, REQ-014)
+- [ ] GET /api/v1/care/menopause-logs — 갱년기 기록 조회·변화 추이 (E04, REQ-015)
 
 <!-- 05 END -->
 
