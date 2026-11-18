@@ -455,82 +455,231 @@
 ---
 
 <!-- 02 START · 문진 · 담당: ______ -->
-## 02. 문진 (문진·검진 수치)
+## 건강 문진 및 검진 수치 API 명세서
 
-담당: ______ · 관련 화면: B01~B05
+**대화형 4단계 건강 문진(`B01`\~`B04`)**, **선택 검진 수치 입력/검증(`B05`)**, 그리고 **위험 예측/관리 평가 실행(`C01`/`C02` 분기)**을 위한 백엔드 REST API 명세서입니다.
 
-### 7. 문진 응답 저장
-- Method / Endpoint: `POST /api/v1/questionnaires`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body:
+## 🗺️ API 매핑 요약
 
-  ```json
-  {
-    "height_cm": 170.5,
-    "weight_kg": 72.0,
-    "diagnosed_diseases": [
-      "hypertension"
-    ],
-    "smoking_status": "former",
-    "drinking_per_week": 2,
-    "exercise_days_per_week": 3,
-    "sleep_hours": 6.5,
-    "family_history": [
-      "diabetes"
-    ]
+| 그룹 | 메서드 · 경로 | 설명 | 연관 테이블 / REQ | 연관 화면 | 
+| ----- | ----- | ----- | ----- | ----- | 
+| **문진** | `POST /api/v1/questionnaires` | 문진 응답 저장 (최종 제출 및 임시 저장) | `questionnaires` · `REQ-004` | `B01` \~ `B04` | 
+| **문진** | `GET /api/v1/questionnaires/draft` *(보조)* | 작성 중인 문진(임시 저장) 조회 | `questionnaires` · `REQ-004` | `B01` \~ `B04` | 
+| **문진** | `POST /api/v1/checkups` | 검진 수치 입력(선택) 및 유효성 검증 | `checkup_records` · `REQ-005` | `B05` | 
+| **평가** | `POST /api/v1/predictions` | 위험 예측 / 관리 평가 실행 (`C01`/`C02` 분기) | `risk_predictions` · `REQ-006·035` | `B05` → `C01`/`C02` | 
+
+## 1. 문진 응답 저장 및 임시 저장 (`REQ-004`)
+
+와이어프레임 `B01`\~`B04`에서 입력한 기본 정보, 건강 이력, 생활 습관 데이터를 저장합니다.
+
+* 프론트엔드에서 `B01`\~`B03` 입력 상태를 유지하다가 `B04`(확인)에서 한 번에 호출하거나, `B01`의 **"저장하고 나중에 계속"** 클릭 시 `isDraft: true`로 호출하여 중간 저장할 수 있습니다.
+
+* **Method & Endpoint:** `POST /api/v1/questionnaires`
+
+* **연관 테이블 / REQ:** `questionnaires` · `REQ-004`
+
+* **연관 화면:** `B01 · 기본 정보` \~ `B04 · 확인`
+
+### Request Body
+
+| 필드명 | 타입 | 필수 | 설명 및 허용 값 | 
+| ----- | ----- | ----- | ----- | 
+| `questionnaireId` | Long | N | 기존 임시 저장된 문진을 업데이트할 경우 전달 (신규 생성 시 `null`) | 
+| `isDraft` | Boolean | Y | `true`: 저장하고 나중에 계속(임시 저장) / `false`: 문진 4단계 확인 완료 | 
+| `age` | Integer | N | `[B01]` 만 나이 (예: `52`) | 
+| `gender` | String | N | `[B01]` 성별 (`FEMALE`: 여성, `MALE`: 남성, `NO_RESPONSE`: 응답하지 않음) | 
+| `heightCm` | Double | N | `[B01]` 키 (단위: cm, 예: `162.0`) | 
+| `weightKg` | Double | N | `[B01]` 몸무게 (단위: kg, 예: `61.0`) | 
+| `hasDiagnosedDisease` | Boolean | N | `[B02]` 진단받은 질환 유무 (`false`: 아니요, `true`: 예, 건너뛴 경우 `null`) | 
+| `diagnosedDiseases` | Array<String> | N | `[B02]` 진단 질환 목록 (`HYPERTENSION`: 고혈압, `DIABETES`: 당뇨병, `DYSLIPIDEMIA`: 이상지질혈증, `OTHER`: 기타, `UNKNOWN`: 잘 모르겠어요) | 
+| `isTakingMedication` | String | N | `[B02]` 현재 복약 여부 (`NO`: 없음, `YES`: 있음, `UNKNOWN`: 모름) | 
+| `hasFamilyHistory` | String | N | `[B02]` 가족력 여부 (`NO`: 없음, `YES`: 있음, `UNKNOWN`: 모름) | 
+| `smokingStatus` | String | N | `[B03]` 흡연 여부 (`NON_SMOKER`: 비흡연, `FORMER_SMOKER`: 과거 흡연, `CURRENT_SMOKER`: 현재 흡연) | 
+| `drinkingFrequency` | String | N | `[B03]` 음주 빈도 (`ONCE_A_WEEK_OR_LESS`: 주 1회 이하 등 코드값) | 
+| `exerciseDaysPerWeek` | Integer | N | `[B03]` 주당 운동 일수 (예: `2`) | 
+| `exerciseMinutesPerDay` | Integer | N | `[B03]` 하루 운동 시간 - 분 단위 (예: `20`) | 
+| `averageSleepMinutes` | Integer | N | `[B03]` 평균 수면 시간 - 분 단위 환산 (예: 6시간 30분 -> `390`) | 
+
+```
+{
+  "questionnaireId": null,
+  "isDraft": false,
+  "age": 52,
+  "gender": "FEMALE",
+  "heightCm": 162,
+  "weightKg": 61,
+  "hasDiagnosedDisease": false,
+  "diagnosedDiseases": [],
+  "isTakingMedication": "NO",
+  "hasFamilyHistory": "UNKNOWN",
+  "smokingStatus": "NON_SMOKER",
+  "drinkingFrequency": "ONCE_A_WEEK_OR_LESS",
+  "exerciseDaysPerWeek": 2,
+  "exerciseMinutesPerDay": 20,
+  "averageSleepMinutes": 390
+}
+
+```
+
+### Response (`201 Created`)
+
+```
+{
+  "success": true,
+  "code": "QUESTIONNAIRE_201",
+  "message": "문진 응답이 저장되었습니다.",
+  "data": {
+    "questionnaireId": 1024,
+    "status": "COMPLETED",
+    "createdAt": "2026-11-18T18:35:00+09:00"
   }
-  ```
-- Response Body (성공 예시 = Mock Data):
+}
 
-  ```json
-  {
-    "questionnaire_id": 5,
-    "bmi": 24.8,
-    "created_at": "2026-11-18T10:10:00+09:00"
+```
+
+### 1-1. 임시 저장된 문진 조회 (`B01` 재진입 시)
+
+`B01` 하단의 **"저장하고 나중에 계속"**으로 이탈 후 재진입했을 때 이전 입력 내용을 복원하기 위한 보조 API입니다.
+
+* **Method & Endpoint:** `GET /api/v1/questionnaires/draft`
+
+* **Response (`200 OK`):** 저장된 문진이 없으면 `data: null` 반환, 존재하면 위 Request Body와 동일한 구조의 필드 반환.
+
+## 2. 검진 수치 입력 (선택) (`REQ-005`)
+
+`B05 · 검진 수치 입력` 화면에서 사용자가 입력한 혈압 및 혈당 수치를 검증하고 `checkup_records` 테이블에 저장합니다.
+
+* **"수치 없이 평가하기"**를 선택한 경우 이 API를 호출하지 않고 바로 `3. 위험 예측 / 관리 평가 실행` API를 호출합니다.
+
+* **Method & Endpoint:** `POST /api/v1/checkups`
+
+* **연관 테이블 / REQ:** `checkup_records` · `REQ-005`
+
+* **연관 화면:** `B05 · 검진 수치 입력`
+
+### Request Body
+
+| 필드명 | 타입 | 필수 | 설명 및 검증 규칙 | 
+| ----- | ----- | ----- | ----- | 
+| `questionnaireId` | Long | N | 연관된 문진 ID (`questionnaires.id`) | 
+| `systolicBp` | Integer | N | 수축기 혈압 (단위: mmHg, 양의 정수, 이완기 혈압보다 커야 함) | 
+| `diastolicBp` | Integer | N | 이완기 혈압 (단위: mmHg, 양의 정수, 수축기 혈압보다 작아야 함) | 
+| `fastingBloodSugar` | Integer | N | 공복 혈당 (단위: mg/dL, 양의 정수) | 
+| `measuredDate` | String | N | 측정일 (`YYYY-MM-DD` 형식, 미래 날짜 불가) | 
+
+```
+{
+  "questionnaireId": 1024,
+  "systolicBp": 120,
+  "diastolicBp": 80,
+  "fastingBloodSugar": null,
+  "measuredDate": "2026-11-10"
+}
+
+```
+
+### Response (`201 Created`)
+
+```
+{
+  "success": true,
+  "code": "CHECKUP_201",
+  "message": "검진 수치가 저장되었습니다.",
+  "data": {
+    "checkupRecordId": 502,
+    "questionnaireId": 1024,
+    "systolicBp": 120,
+    "diastolicBp": 80,
+    "fastingBloodSugar": null,
+    "measuredDate": "2026-11-10"
   }
-  ```
-- Status Code: 성공: 201 Created / 400 필수값 누락·범위 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: questionnaires · REQ-004
-- 우선순위: MVP
-- 비고: 문진 4단계는 1회 제출 또는 단계별 저장 중 선택 필요. 필드는 문진표 확정 후 수정
+}
 
-### 8. 검진 수치 입력 (선택)
-- Method / Endpoint: `POST /api/v1/checkups`
-- 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body:
+```
 
-  ```json
-  {
-    "checkup_date": "2026-10-05",
-    "systolic_bp": 132,
-    "diastolic_bp": 84,
-    "fasting_glucose": 104,
-    "hba1c": 5.8,
-    "total_cholesterol": 210,
-    "ldl": 130,
-    "hdl": 48,
-    "triglycerides": 160
+### Error Response (`400 Bad Request` - `B05` 검증 오류)
+
+숫자가 아닌 값(`"abc"`) 입력, 수축기 $\le$ 이완기 혈압 역전, 의학적 경계값 초과 시 반환됩니다.
+
+```
+{
+  "success": false,
+  "code": "CHECKUP_VALIDATION_400",
+  "message": "입력 오류를 수정해 주세요.",
+  "errors": [
+    {
+      "field": "systolicBp",
+      "rejectedValue": "abc",
+      "reason": "숫자로 입력해 주세요. 예: 120"
+    },
+    {
+      "field": "bloodPressureRange",
+      "reason": "수축기 혈압은 이완기 혈압보다 높아야 합니다."
+    }
+  ]
+}
+
+```
+
+## 3. 위험 예측 / 관리 평가 실행 (`REQ-006·035`)
+
+저장된 문진 응답(`questionnaireId`)과 선택적으로 입력된 검진 수치(`checkupRecordId`)를 바탕으로 위험 예측 및 건강 상태 평가를 실행하고 `risk_predictions`에 결과를 저장합니다.
+
+* **Method & Endpoint:** `POST /api/v1/predictions`
+
+* **연관 테이블 / REQ:** `risk_predictions` · `REQ-006·035`
+
+* **연관 화면:** `B05` 완료 또는 `수치 없이 평가하기` 클릭 → 결과 화면(`C01` / `C02`) 이동
+
+### Request Body
+
+| 필드명 | 타입 | 필수 | 설명 | 
+| ----- | ----- | ----- | ----- | 
+| `questionnaireId` | Long | Y | 평가 대상 문진 ID (`POST /api/v1/questionnaires` 응답값) | 
+| `checkupRecordId` | Long | N | 검진 수치 ID (`POST /api/v1/checkups` 응답값, **"수치 없이 평가하기"** 선택 시 `null`) | 
+
+```
+{
+  "questionnaireId": 1024,
+  "checkupRecordId": 502
+}
+
+```
+
+### Response (`201 Created`)
+
+> `진단 여부 및 수치 유무에 따라 결과 화면 C01 / C02 분기`에 맞춰 프론트엔드 라우팅용 `resultScreenType`을 함께 반환합니다.
+
+```
+{
+  "success": true,
+  "code": "PREDICTION_201",
+  "message": "위험 예측 및 관리 평가가 완료되었습니다.",
+  "data": {
+    "predictionId": 8801,
+    "questionnaireId": 1024,
+    "checkupRecordId": 502,
+    "resultScreenType": "C01",
+    "hasCheckupMetrics": true,
+    "riskSummary": {
+      "overallLevel": "LOW",
+      "headline": "현재 생활 습관이 전반적으로 양호합니다."
+    },
+    "createdAt": "2026-11-18T18:36:10+09:00"
   }
-  ```
-- Response Body (성공 예시 = Mock Data):
+}
 
-  ```json
-  {
-    "checkup_id": 3,
-    "created_at": "2026-11-18T10:12:00+09:00"
-  }
-  ```
-- Status Code: 성공: 201 Created / 400 수치 범위 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: checkup_records · REQ-005
-- 우선순위: MVP
-- 비고: 모든 수치 선택 입력(건너뛰기 가능)
+```
 
-#### ➕ 추가 검토 (뼈대·화면에는 있는데 초안에 없는 API)
-- [ ] GET /api/v1/questionnaires/latest — 최근 문진 조회 (재문진·수정 화면용)
+## 📋 상태 및 코드 정의 (Enum Reference)
+
+| 구분 | 코드값 | 화면 표시 라벨 | 
+| ----- | ----- | ----- | 
+| **성별 (`gender`)** | `FEMALE` / `MALE` / `NO_RESPONSE` | 여성 / 남성 / 응답하지 않음 | 
+| **진단 질환 (`diagnosedDiseases`)** | `HYPERTENSION` / `DIABETES` / `DYSLIPIDEMIA` / `OTHER` / `UNKNOWN` | 고혈압 / 당뇨병 / 이상지질혈증 / 기타 / 잘 모르겠어요 | 
+| **복약·가족력 (`NO/YES/UNKNOWN`)** | `NO` / `YES` / `UNKNOWN` | 없음 / 있음 / 모름 | 
+| **흡연 (`smokingStatus`)** | `NON_SMOKER` / `FORMER_SMOKER` / `CURRENT_SMOKER` | 비흡연 / 과거 흡연 / 현재 흡연 | 
+| **결과 분기 (`resultScreenType`)** | `C01` / `C02` | `C01` (수치 미입력/일반 관리군) / `C02` (유질환·수치 기반 정밀 평가군) | 
 
 <!-- 02 END -->
 
