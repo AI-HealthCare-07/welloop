@@ -24,10 +24,14 @@ const val = (id) => $("#" + id)?.value || null;
 const chk = (id) => !!$("#" + id)?.checked;
 const showErr = (e) => { const el = $("#err"); if (el) el.textContent = e.message; };
 const go = (h) => { location.hash = h; };
-function bars(points, key) {
+function bars(points, key, fixedMax) {
   if (!points.length) return `<p class="sub">아직 기록이 없어요. 기록이 쌓이면 여기에 변화가 보여요.</p>`;
-  const last = points.slice(-6), max = Math.max(...last.map((p) => p[key])) || 1;
-  return `<div class="bars">${last.map((p) => `<div><b>${p[key]}</b><i style="height:${Math.max(6, (p[key] / max) * 80)}%"></i><span>${md(p.date)}</span></div>`).join("")}</div>`;
+  const last = points.slice(-6), vals = last.map((p) => p[key]);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  // 점수(0~100)는 전체 눈금 기준, 체중·혈압 등은 기록 범위 기준으로 높이를 정해 작은 변화도 보이게 해요
+  const h = (v) => fixedMax ? Math.max(4, (v / fixedMax) * 100) : hi === lo ? 55 : 30 + ((v - lo) / (hi - lo)) * 60;
+  const note = last.length === 1 ? `<p class="sub">기록이 2번 이상 쌓이면 변화를 비교할 수 있어요.</p>` : "";
+  return `<div class="bars">${last.map((p) => `<div><b>${p[key]}</b><i style="height:${h(p[key])}%"></i><span>${md(p.date)}</span></div>`).join("")}</div>${note}`;
 }
 const alertCard = (a) => `<div class="card alert ${a.level}"><h2>${esc(a.title)}</h2><p>${esc(a.message)}</p></div>`;
 const alertsHtml = async () => (await api("/safety/alerts").catch(() => ({ items: [] }))).items.map(alertCard).join("");
@@ -163,7 +167,7 @@ const routes = {
   health: async (period = "1m") => { const d = await api("/dashboard?period=" + period);
     view.innerHTML = `<h1>기록의 변화를<br>한눈에 살펴보세요</h1>
       <select id="period"><option value="1m">최근 1개월</option><option value="3m">3개월</option><option value="all">전체</option></select>
-      <div class="card" style="margin-top:14px"><h2>위험 신호 점수 추이 · 0~100점</h2><p class="sub">점수가 높을수록 위험 신호가 커요</p>${bars(d.risk_score_trend.points, "score")}</div>
+      <div class="card" style="margin-top:14px"><h2>위험 신호 점수 추이 · 0~100점</h2><p class="sub">점수가 높을수록 위험 신호가 커요</p>${bars(d.risk_score_trend.points, "score", 100)}</div>
       ${d.health_trends.map((t) => `<div class="card"><h2>${esc(t.label)} 추이 · ${esc(t.unit)}</h2>${bars(t.points, "value")}</div>`).join("")}
       <p class="sub">${esc(d.notice)}</p><button class="btn" onclick="go('#/record')">오늘의 건강 수치 기록</button>
       <button class="btn text" onclick="go('#/history')">예측 이력 보기</button>`;
@@ -219,7 +223,8 @@ const STEPS = {
       <label>평균 수면 (시간)</label><input id="sleep_hours" type="number" min="0" max="24" step="0.5"><label class="check"><input id="sleep_trouble" type="checkbox">잠들기 어렵거나 자주 깨요</label>
       <p class="sub">정확하지 않아도 괜찮아요. 가장 가까운 답을 적어 주세요.</p>`,
   3: () => `<h1>건강 위험 요인을<br>확인할게요</h1>${yn3("family_htn", "가족 중 고혈압")}${yn3("family_dm", "가족 중 당뇨")}${yn3("family_dl", "가족 중 이상지질혈증")}
-      <label class="check"><input id="exercise_restricted" type="checkbox">의사에게 운동 제한 안내를 받았어요</label>`,
+      <label class="check"><input id="exercise_restricted" type="checkbox">의사에게 "운동을 조심하라"는 말을 들었어요</label>
+      <p class="sub">예: 심장·관절 문제로 무리한 운동을 피하라고 들은 경우예요. 체크하면 강도 높은 미션은 빼고 추천해요.</p>`,
   4: () => `<h1>마지막으로,<br>맞춤 설정이에요</h1>${me?.gender === "FEMALE" ? `<label>폐경 상태</label><select id="menopause_status"><option value="">선택 안 함</option><option value="PRE">폐경 전</option><option value="PERI">진행 중</option><option value="POST">폐경 후</option></select>` : ""}
       <label>가장 바꾸고 싶은 생활습관</label><input id="improvement_goal" type="text" maxlength="100" placeholder="예: 저녁 식사 후 걷기">
       <div class="card" style="margin-top:16px"><h2>다음 단계 안내</h2><p class="sub">입력한 내용으로 위험 신호를 살펴봅니다. 의학적 진단이 아니에요.</p></div>`,
@@ -249,4 +254,5 @@ async function render() {
   try { await (routes[name] || routes[""])(); } catch (e) { view.innerHTML = `<div class="card"><h2>화면을 불러오지 못했어요</h2><p class="sub">${esc(e.message)}</p></div>`; }
   window.scrollTo(0, 0);
 }
+$("#logo").onclick = (e) => { e.preventDefault(); go(store.t ? "#/home" : "#/"); if (location.hash === (store.t ? "#/home" : "#/")) render(); };
 window.addEventListener("hashchange", render); window.go = go; render();
