@@ -1,0 +1,34 @@
+{
+  "model_version": "risk-v0.0-synth",
+  "data_source": "SYNTHETIC",
+  "trained_on": "2026-11-19",
+  "model_type": "logistic_regression (기준 모델)",
+  "split": "층화 홀드아웃 25%",
+  "metrics": {
+    "HYPERTENSION": {
+      "n_train": 6000,
+      "n_test": 2000,
+      "positive_rate": 0.1471,
+      "auroc": 0.6698,
+      "auprc": 0.254,
+      "brier": 0.1196
+    },
+    "DIABETES": {
+      "n_train": 6000,
+      "n_test": 2000,
+      "positive_rate": 0.0506,
+      "auroc": 0.67,
+      "auprc": 0.0972,
+      "brier": 0.0471
+    },
+    "DYSLIPIDEMIA": {
+      "n_train": 6000,
+      "n_test": 2000,
+      "positive_rate": 0.3144,
+      "auroc": 0.6007,
+      "auprc": 0.3995,
+      "brier": 0.2097
+    }
+  },
+  "note": "합성 데이터 모델: 지표·점수에 의미 없음. 연동·화면 개발용."
+}

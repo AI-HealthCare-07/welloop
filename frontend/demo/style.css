@@ -1,0 +1,41 @@
+:root { --green:#1f7a5a; --green-soft:#e6f3ee; --ink:#1c2420; --sub:#5d6964; --line:#dfe5e2; --bg:#f5f7f6; --warn:#b3541e; --high:#b3261e; }
+* { box-sizing: border-box; }
+body { margin:0; background:#e9edeb; color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif; font-size:17px; line-height:1.55; }
+body.big { font-size:20px; }
+#phone { max-width:480px; min-height:100vh; margin:0 auto; background:var(--bg); display:flex; flex-direction:column; }
+#top { background:#fff; padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px; font-size:1.1em; color:var(--green); }
+#demo-tag { font-size:.7em; background:var(--green-soft); color:var(--green); padding:2px 8px; border-radius:99px; }
+main { flex:1; padding:20px 20px 96px; }
+h1 { font-size:1.45em; line-height:1.3; margin:.2em 0 .6em; }
+h2 { font-size:1.05em; margin:0 0 .5em; }
+p { margin:.3em 0; } .sub { color:var(--sub); font-size:.88em; }
+.card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px; margin:0 0 14px; }
+.big-num { font-size:2.4em; font-weight:700; line-height:1.1; }
+.btn { display:block; width:100%; min-height:52px; border:0; border-radius:12px; background:var(--green); color:#fff; font-size:1em; font-weight:600; margin:10px 0; cursor:pointer; }
+.btn.ghost { background:#fff; color:var(--green); border:1.5px solid var(--green); }
+.btn.text { background:none; color:var(--sub); min-height:44px; font-weight:400; }
+.btn:disabled { opacity:.5; }
+label { display:block; font-size:.9em; font-weight:600; margin:14px 0 6px; }
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=date],select { width:100%; min-height:50px; border:1.5px solid var(--line); border-radius:10px; padding:0 14px; font-size:1em; background:#fff; color:var(--ink); }
+.check { display:flex; align-items:center; gap:10px; min-height:48px; font-weight:400; margin:4px 0; }
+.check input { width:24px; height:24px; accent-color:var(--green); flex:none; }
+.row { display:flex; gap:10px; } .row > * { flex:1; }
+.chip { display:inline-block; padding:3px 10px; border-radius:99px; font-size:.82em; background:var(--green-soft); color:var(--green); margin:2px 4px 2px 0; }
+.chip.WARNING { background:#fdf0e6; color:var(--warn); } .chip.HIGH { background:#fbe9e7; color:var(--high); } .chip.muted { background:#eef1f0; color:var(--sub); }
+.notice { background:#fff8e1; border:1px solid #f0dfa8; border-radius:10px; padding:10px 12px; font-size:.85em; margin:0 0 14px; }
+.error { color:var(--high); font-size:.9em; min-height:1.4em; }
+.bars { display:flex; align-items:flex-end; gap:8px; height:130px; margin-top:10px; }
+.bars div { flex:1; text-align:center; font-size:.75em; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+.bars i { display:block; background:#b9c5c0; border-radius:6px 6px 0 0; min-height:4px; }
+.bars div:last-child i { background:var(--green); }
+.bars span { color:var(--sub); margin-top:4px; }
+.mission { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); }
+.mission:first-of-type { border-top:0; } .mission input { width:28px; height:28px; accent-color:var(--green); flex:none; margin-top:2px; }
+.steps { display:flex; gap:6px; margin-bottom:14px; } .steps i { flex:1; height:5px; border-radius:9px; background:var(--line); } .steps i.on { background:var(--green); }
+.list-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--line); gap:8px; }
+.list-row:first-child { border-top:0; }
+.link { color:var(--green); background:none; border:0; font-size:.9em; cursor:pointer; padding:8px; text-decoration:underline; }
+#tabs { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:480px; background:#fff; border-top:1px solid var(--line); display:flex; }
+#tabs[hidden] { display:none; }
+#tabs a { flex:1; text-align:center; padding:16px 0; min-height:56px; color:var(--sub); text-decoration:none; font-size:.85em; }
+#tabs a.on { color:var(--green); font-weight:700; }
