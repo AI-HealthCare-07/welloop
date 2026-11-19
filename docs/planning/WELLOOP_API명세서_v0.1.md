@@ -90,9 +90,13 @@
 | 04 | 13 | PUT | `/api/v1/users/me/categories` | 카테고리 켜기/끄기 저장 | MVP |
 | 04 | 14 | GET | `/api/v1/challenges/today` | 오늘의 미션 조회 | MVP |
 | 04 | 15 | POST | `/api/v1/checkins` | 미션·수면·기분·복약 체크인 | MVP |
-| 05 | 16 | POST | `/api/v1/sos` | 흡연 욕구 SOS 기록 | 추가 |
-| 05 | 20 | GET | `/api/v1/coach/today` | 오늘의 코치 메시지 (하루 1회 생성, 저장본 재사용) | MVP |
-| 05 | 21 | POST | `/api/v1/coach/chat` | AI 코치 실시간 대화 (SSE 스트리밍) | 추가 |
+| 05 | 16 | POST | `/api/v1/care/sos` | 흡연 욕구 SOS 시작 (5분 미루기) | 추가 |
+| 05 | 20 | GET | `/api/v1/coach/today` | 오늘의 코치 메시지·추천 행동 (하루 1회 생성, 저장본 재사용) | MVP |
+| 05 | 21 | POST | `/api/v1/coach/chat` | AI 코치 대화 (SSE 스트리밍) | 추가 |
+| 05 | 21-1 | GET | `/api/v1/coach/threads/{thread_id}/messages` | 코치 대화 내역 조회 | 추가 |
+| 05 | 21-2 | GET | `/api/v1/safety/guides/{alert_type}` | 위험 신호 안내 내용 조회 | MVP |
+| 05 | 21-3 | GET | `/api/v1/care/routines` | 호흡·스트레칭 콘텐츠 목록 | 추가 |
+| 05 | 21-4 | PUT | `/api/v1/care/menopause-logs/{log_date}` | 갱년기 오늘의 상태 저장 (같은 날 덮어쓰기) | 추가 |
 | 06 | 27 | POST | `/api/v1/admin/login` | 관리자 로그인 | MVP |
 | 06 | 28 | GET | `/api/v1/admin/challenges` | 챌린지·콘텐츠 목록 조회 | MVP |
 | 06 | 29 | POST | `/api/v1/admin/challenges` | 챌린지 등록 | MVP |
@@ -1275,7 +1279,7 @@
   data: {"code":"AI_UNAVAILABLE","message":"잠시 후 다시 시도해 주세요."}
   ```
 - Status Code: 200 OK (스트림 시작) / 400 message 비어 있음·500자 초과 / 401 토큰 없음·만료 / 404 thread 없음(본인 대화 아님 포함) / 409 AI 처리 동의 없음 / 429 호출 한도 초과 · ※ 스트림 시작 후 오류는 상태 코드 대신 `event: error`
-- 관련 테이블 · REQ: coach_threads · coach_chat_messages(추가 제안) · safety_alerts · REQ-021·022, NFR-002·010
+- 관련 테이블 · REQ: coach_threads(추가 제안) · coach_chat_messages(추가 제안) · safety_alerts(추가 제안) · REQ-021·022, NFR-002·010
 - 관련 화면: E01
 - 비고: `thread_id`가 null이면 서버가 새 대화 생성(클라이언트 임의 id 금지). 입력을 먼저 서버 키워드 규칙으로 검사 → 위험이면 LLM 미호출. 최근 N턴만 LLM 전달, max_tokens 512. 와이어프레임 E01은 MVP라 범위 확인 필요
 
@@ -1309,7 +1313,7 @@
   }
   ```
 - Status Code: 200 OK / 400 size 범위 오류 / 401 토큰 없음·만료 / 404 thread 없음(본인 대화 아님 포함)
-- 관련 테이블 · REQ: coach_chat_messages · REQ-021
+- 관련 테이블 · REQ: coach_chat_messages(추가 제안) · REQ-021
 - 관련 화면: E01
 - 비고: 최신순 페이지네이션(`before_id`)
 
@@ -1351,9 +1355,9 @@
   }
   ```
 - Status Code: 200 OK / 404 알 수 없는 alert_type
-- 관련 테이블 · REQ: safety_guides(또는 서버 고정 설정) · REQ-022, NFR-014
+- 관련 테이블 · REQ: (테이블 없음 · 서버 설정 고정 문구) · REQ-022, NFR-014
 - 관련 화면: E02
-- 비고: 응급 안내는 로그인이 풀려도 열려야 해서 인증 불필요. mental_crisis = 자살예방 상담전화 109 안내, medical_consult = 의료기관 진료 권고. 문구 변경은 관리자 검토·승인 후 적용(F03)
+- 비고: 응급 안내는 로그인이 풀려도 열려야 해서 인증 불필요. mental_crisis = 자살예방 상담전화 109 안내, medical_consult = 의료기관 진료 권고. MVP는 서버 설정 파일의 고정 문구로 관리하고, 관리자 화면(F03)에서 수정해야 하면 그때 테이블로 전환
 
 ### 21-3. 호흡·스트레칭 콘텐츠 목록 · 추가 (추가 제안)
 - Method / Endpoint: `GET /api/v1/care/routines`
@@ -1394,7 +1398,7 @@
   }
   ```
 - Status Code: 200 OK / 400 type 값 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: care_routines(고정 콘텐츠) · REQ-014
+- 관련 테이블 · REQ: (테이블 없음 · 서버 설정 고정 콘텐츠) · REQ-014
 - 관련 화면: E03
 - 비고: 동작 설명은 미리 만든 고정 콘텐츠(LLM이 운동법을 만들지 않음). 문진에서 운동 제한 "예"인 사용자는 서버가 `seated: true`만 반환
 
@@ -1432,117 +1436,18 @@
   }
   ```
 - Status Code: 200 OK (첫 저장·덮어쓰기 모두) / 400 값 오류 ("none"과 다른 증상 동시 선택 포함) / 401 토큰 없음·만료
-- 관련 테이블 · REQ: menopause_logs(symptom_scores 대체 제안) · REQ-015
+- 관련 테이블 · REQ: menopause_logs(추가 제안 · ERD symptom_scores 대체) · REQ-015
 - 관련 화면: E04
-- 비고: `symptoms`: hot_flash / sleep_discomfort / mood_change / other / none, `severity`: mild / moderate / severe. 제안 문구는 고정 규칙. 화면(일일 기록)과 REQ-015(MRS 4주)가 달라 확인 필요
+- 비고: `symptoms`: hot_flash / sleep_discomfort / mood_change / other / none, `severity`: mild / moderate / severe. 제안 문구는 고정 규칙. E04 화면 기준으로 **매일 기록**으로 정함. ERD `symptom_scores`(MRS 11문항·4주마다)는 연결된 화면이 없어 `menopause_logs`로 대체 제안 → ERD 반영 여부와 REQ-015 문구 수정은 백엔드(승환님)와 결정
 
-### 21-5. 감정 메모 저장 · 추가 (추가 제안)
-- Method / Endpoint: `POST /api/v1/care/emotion-notes`
-- Description: 오늘의 감정과 짧은 메모를 나만 보기로 저장한다.
-- 인증: 필요
-- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
-- Request Parameter: -
-- Request Body:
-
-  ```json
-  {
-    "note_date": "2026-11-18",
-    "emotion": "tired",
-    "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요."
-  }
-  ```
-- Response Body (201):
-
-  ```json
-  {
-    "note_id": 17,
-    "note_date": "2026-11-18",
-    "emotion": "tired",
-    "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요.",
-    "visibility": "private",
-    "safety_alert": null,
-    "created_at": "2026-11-18T22:10:00+09:00"
-  }
-  ```
-- Status Code: 201 Created / 400 emotion 값 오류·memo 500자 초과 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: emotion_notes(추가 제안) · REQ-034·022, NFR-005·016
-- 관련 화면: E06
-- 비고: `emotion`: calm / tired / worried / happy, memo 선택(0~500자). 항상 나만 보기(가족 공유·관리자 조회 불가). memo는 서버 키워드 검사 → 위험 표현이면 `safety_alert`(mental_crisis). 임시 작성 내용은 프론트에서만 보관
-
-### 21-6. 감정 메모 목록 조회 · 추가 (추가 제안)
-- Method / Endpoint: `GET /api/v1/care/emotion-notes`
-- Description: 내 감정 메모를 기간별로 조회한다.
-- 인증: 필요
-- Request Header: `Authorization: Bearer {access_token}`
-- Request Parameter: Query `from_date`, `to_date`, `page`(기본 1), `size`(기본 10)
-- Request Body: -
-- Response Body (200):
-
-  ```json
-  {
-    "items": [
-      {
-        "note_id": 17,
-        "note_date": "2026-11-18",
-        "emotion": "tired",
-        "memo": "오늘은 피곤했지만 잠깐 걸어서 좋았어요.",
-        "created_at": "2026-11-18T22:10:00+09:00"
-      }
-    ],
-    "total": 1,
-    "page": 1,
-    "size": 10
-  }
-  ```
-- Status Code: 200 OK / 400 날짜 형식 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: emotion_notes · REQ-034
-- 관련 화면: E06
-- 비고: 본인 메모만 조회
-
-### 21-7. 감정 메모 수정 · 추가 (추가 제안)
-- Method / Endpoint: `PATCH /api/v1/care/emotion-notes/{note_id}`
-- Description: 감정이나 메모 내용을 고친다.
-- 인증: 필요
-- Request Header: `Content-Type: application/json`, `Authorization: Bearer {access_token}`
-- Request Parameter: Path `note_id`
-- Request Body:
-
-  ```json
-  {
-    "emotion": "calm",
-    "memo": "산책하고 나니 마음이 편해졌어요."
-  }
-  ```
-- Response Body (200):
-
-  ```json
-  {
-    "note_id": 17,
-    "emotion": "calm",
-    "memo": "산책하고 나니 마음이 편해졌어요.",
-    "safety_alert": null,
-    "updated_at": "2026-11-18T22:30:00+09:00"
-  }
-  ```
-- Status Code: 200 OK / 400 값 오류·500자 초과 / 401 토큰 없음·만료 / 404 메모 없음(본인 것 아님 포함)
-- 관련 테이블 · REQ: emotion_notes · REQ-034
-- 관련 화면: E06
-- 비고: 바뀐 필드만 전달. 수정할 때도 키워드 검사
-
-### 21-8. 감정 메모 삭제 · 추가 (추가 제안)
-- Method / Endpoint: `DELETE /api/v1/care/emotion-notes/{note_id}`
-- Description: 감정 메모를 바로 삭제한다.
-- 인증: 필요
-- Request Header: `Authorization: Bearer {access_token}`
-- Request Parameter: Path `note_id`
-- Request Body: -
-- Response Body (204):
-
-  (본문 없음)
-- Status Code: 204 No Content / 401 토큰 없음·만료 / 404 메모 없음(본인 것 아님 포함)
-- 관련 테이블 · REQ: emotion_notes · REQ-034, NFR-005
-- 관련 화면: E06
-- 비고: 즉시 실제 삭제 (화면 안내: "언제든 수정·삭제할 수 있어요")
+#### 감정 메모 (E06) → 04 참고
+ERD v1.3의 `checkins.memo`(LLM 전달 X, 키워드 검사만)와 같은 데이터라 별도 API를 만들지 않고 **04 구역 15번 체크인 API(`POST /api/v1/checkins`)로 저장합니다.** E06에서 쓰는 값만 04 필드 이름 기준으로 정리합니다.
+- `checkin_date`: 메모를 남기는 날짜 (하루 1개)
+- `mood_score`: E06 "지금의 감정" 선택값. 별도 `emotion` 필드 없이 04와 같은 기분 값(1~5)으로 저장 → E06 감정 선택지를 D04 기분 선택과 같은 기준으로 맞춤
+- `memo`: 선택, 0~500자 → 04 15번 Request Body에 `memo` 필드 추가 필요 (ERD `checkins.memo`)
+- 수정·삭제: 04 비고의 "같은 날 체크인 수정 API"로 처리 (`memo`를 비우면 삭제). 같은 날 재저장이 지금처럼 409면 E06 저장이 막히므로 수정 방식 확정 필요
+- 안전: memo는 서버 키워드 검사 → 위험 표현이면 응답에 `safety_alert`(mental_crisis) 포함
+- 공개 범위: 항상 나만 보기 (함께 관리 공유·관리자 조회·LLM 전달 대상 아님)
 
 #### ➕ 추가 검토 (화면에 없어 본문에서 뺀 API · 화면이 추가되면 본문으로 옮김)
 - [ ] PATCH /api/v1/care/sos/{sos_id} — 흡연 욕구 SOS 결과 기록 (버텼어요/피웠어요) (E05, REQ-016)
