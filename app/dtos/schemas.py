@@ -88,3 +88,34 @@ class HealthLogRequest(BaseModel):
 
 class SimulateRequest(BaseModel):
     changes: dict
+
+
+class CheckupRequest(BaseModel):
+    checkup_date: dt.date | None = None
+    pressure_systolic: int | None = Field(None, ge=60, le=260)
+    pressure_diastolic: int | None = Field(None, ge=30, le=160)
+    fasting_glucose: int | None = Field(None, ge=30, le=600)
+    hba1c: float | None = Field(None, ge=3, le=20)
+    total_cholesterol: int | None = Field(None, ge=50, le=600)
+    ldl_cholesterol: int | None = Field(None, ge=10, le=400)
+    hdl_cholesterol: int | None = Field(None, ge=5, le=200)
+    triglycerides: int | None = Field(None, ge=10, le=2000)
+
+
+class ChallengeAdminRequest(BaseModel):
+    category: Literal["DIET", "ACTIVITY", "SLEEP_REST", "SMOKE_DRINK"]
+    title: str = Field(min_length=1, max_length=60)
+    description: str = Field("", max_length=200)
+    intensity: Literal["LIGHT", "MODERATE", "HARD"] = "LIGHT"
+    is_active: bool = True
+
+
+class KeywordRequest(BaseModel):
+    keyword: str = Field(min_length=1, max_length=40)
+    kind: Literal["RISK_SIGNAL", "MEDICAL_BAN", "FAMILY_BAN"]
+    is_active: bool = True
+
+
+class ThresholdRequest(BaseModel):
+    warning_from: float = Field(gt=0, lt=1)
+    high_from: float = Field(gt=0, lt=1)

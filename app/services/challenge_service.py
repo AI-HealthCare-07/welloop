@@ -115,7 +115,9 @@ def save_checkin(db: Session, user: User, body) -> tuple[dict, bool]:
             setattr(checkin, f, getattr(body, f))
     db.commit()
     done = sum(d.is_completed for d in assigned.values())
-    return {"checkin_id": checkin.id, "checkin_date": date.isoformat(),
+    from app.services import safety_service  # 메모는 서버 키워드 검사만 하고 LLM에 보내지 않음 (REQ-022 ④, REQ-034)
+    crisis = safety_service.CRISIS if safety_service.matches(db, checkin.memo, "RISK_SIGNAL") else None
+    return {"checkin_id": checkin.id, "checkin_date": date.isoformat(), "safety_alert": crisis,
             "completion_rate": round(done / len(assigned), 2) if assigned else 0.0,
             "streak_days": streak(db, user.user_id, date), "created_at": checkin.created_at.isoformat()}, created
 
@@ -133,6 +135,9 @@ def coach_today(db: Session, user: User) -> dict:
         streak_days = missions["streak_days"]
         opener = f"{streak_days}일째 이어 가고 계세요. " if streak_days else "오늘도 찾아 주셔서 반가워요. "
         content = f"{user.name}님, {opener}오늘은 '{first}'부터 가볍게 시작해 볼까요? 못 한 날이 있어도 괜찮아요. 다시 시작하면 됩니다."
+        from app.services import safety_service
+        if safety_service.matches(db, content.replace(user.name, ""), "MEDICAL_BAN"):  # 금지어가 섞이면 안전한 기본 문구로 (NFR-014)
+            content = "오늘도 찾아 주셔서 반가워요. 가벼운 실천 하나부터 시작해 볼까요?"
         source = "TEMPLATE"  # TODO(LLM 담당): LLM_API_KEY가 있으면 같은 사실 데이터로 문장만 다듬고, 금지어·수치 검사 후 저장
         _ = os.environ.get("LLM_API_KEY")
         msg = CoachMessage(user_id=user.user_id, message_date=date, content=content, source=source)

@@ -156,3 +156,49 @@ class CoachMessage(Base):
     content: Mapped[str] = mapped_column(String)
     source: Mapped[str] = mapped_column(String)  # TEMPLATE / LLM
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class CheckupRecord(Base):
+    __tablename__ = "checkup_records"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"), index=True)
+    checkup_date: Mapped[dt.date | None] = mapped_column(Date)
+    pressure_systolic: Mapped[int | None] = mapped_column(Integer)
+    pressure_diastolic: Mapped[int | None] = mapped_column(Integer)
+    fasting_glucose: Mapped[int | None] = mapped_column(Integer)
+    hba1c: Mapped[float | None] = mapped_column(Float)
+    total_cholesterol: Mapped[int | None] = mapped_column(Integer)
+    ldl_cholesterol: Mapped[int | None] = mapped_column(Integer)
+    hdl_cholesterol: Mapped[int | None] = mapped_column(Integer)
+    triglycerides: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SafetyKeyword(Base):
+    __tablename__ = "safety_keywords"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    keyword: Mapped[str] = mapped_column(String, unique=True)
+    kind: Mapped[str] = mapped_column(String)  # RISK_SIGNAL(위험 신호) / MEDICAL_BAN(의료 표현 금지) / FAMILY_BAN(가족 문구 금지)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class RiskThreshold(Base):
+    __tablename__ = "risk_thresholds"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    disease_type: Mapped[str] = mapped_column(String, unique=True)
+    warning_from: Mapped[float] = mapped_column(Float)
+    high_from: Mapped[float] = mapped_column(Float)
+    model_version: Mapped[str] = mapped_column(String, default="")
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AdminLog(Base):
+    __tablename__ = "admin_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_id: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String)
+    target: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
