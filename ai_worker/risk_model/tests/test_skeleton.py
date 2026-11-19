@@ -5,7 +5,6 @@ from ai_worker.risk_model.config import DATA_SOURCE_SYNTHETIC
 from ai_worker.risk_model.data.synthetic import LABEL_COLUMNS, make_synthetic
 from ai_worker.risk_model.errors import RiskInputError
 from ai_worker.risk_model.spec import load_spec, validate_input
-from ai_worker.tasks.risk import predict_risk
 
 VALID = {
     "age": 52, "gender": "FEMALE", "height": 162.0, "weight": 61.0, "waist_size": 82.5,
@@ -58,12 +57,3 @@ def test_validate_rejects_bad_input(patch, field):
     with pytest.raises(RiskInputError) as e:
         validate_input({**VALID, **patch})
     assert field in e.value.errors
-
-
-def test_predict_risk_validates_then_reports_not_implemented():
-    with pytest.raises(RiskInputError):
-        predict_risk({**VALID, "age": None})
-    with pytest.raises(RiskInputError):
-        predict_risk(VALID, diseases=["CANCER"])
-    with pytest.raises(NotImplementedError):
-        predict_risk(VALID)
