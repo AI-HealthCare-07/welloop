@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.security import current_user
+from app.core.security import api_error, current_user
 from app.dtos.schemas import HealthLogRequest
 from app.models.tables import User
 from app.services import record_service as svc
@@ -31,11 +31,15 @@ def list_logs(period: Period = "1m", page: int = Query(1, ge=1), size: int = Que
 @router.patch("/health-logs/{health_log_id}")
 def update_log(health_log_id: int, body: HealthLogRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
     log = svc.get_own_log(db, user, health_log_id)
-    for f in svc.LOG_FIELDS:
-        if getattr(body, f) is not None:
-            setattr(log, f, getattr(body, f))
+    changes = {f: getattr(body, f) for f in svc.LOG_FIELDS if getattr(body, f) is not None}
+    if not changes:
+        raise api_error(400, "VALIDATION_ERROR", "바꿀 수치가 없어요")
+    body_changed = any(f in changes and changes[f] != getattr(log, f) for f in ("weight", "waist_size"))
+    for f, v in changes.items():
+        setattr(log, f, v)
     db.commit()
-    return svc.log_out(log)
+    recalculated = svc.pred.recalculate(db, user, "HEALTH_LOG") if body_changed else False
+    return svc.log_out(log, recalculated)
 
 
 @router.delete("/health-logs/{health_log_id}", status_code=204)

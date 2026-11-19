@@ -9,6 +9,7 @@ from app.dtos.schemas import ChallengeAdminRequest, KeywordRequest, LoginRequest
 from app.models.tables import (AdminLog, Challenge, Checkin, CoachMessage, DailyChallenge, RiskPrediction, RiskThreshold,
                                SafetyKeyword, User, now)
 from app.services import challenge_service, prediction_service, safety_service
+from app.models.tables import iso
 
 router = APIRouter(prefix="/api/v1/admin", tags=["06 관리자"])
 
@@ -26,7 +27,7 @@ def _log(db: Session, admin: User, action: str, target: str) -> None:
 
 @router.post("/login")
 def admin_login(body: LoginRequest, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == body.email))
+    user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
     if user is None or not verify_password(body.password, user.password):
         raise api_error(401, "LOGIN_FAILED", "이메일 또는 비밀번호가 맞지 않아요")
     if user.role != "ADMIN":
@@ -143,7 +144,7 @@ def update_threshold(disease_type: str, body: ThresholdRequest, admin: User = De
     t.warning_from, t.high_from, t.updated_by, t.updated_at = body.warning_from, body.high_from, admin.user_id, now()
     db.commit()
     _log(db, admin, "경계값 수정", f"risk_thresholds:{disease_type}")
-    return {"disease_type": disease_type, "warning_from": t.warning_from, "high_from": t.high_from, "updated_at": t.updated_at.isoformat()}
+    return {"disease_type": disease_type, "warning_from": t.warning_from, "high_from": t.high_from, "updated_at": iso(t.updated_at)}
 
 
 @router.get("/stats")
@@ -163,4 +164,4 @@ def stats(admin: User = Depends(admin_user), db: Session = Depends(get_db)):
             "coach_messages": count(select(func.count(CoachMessage.id))),
             "llm_calls": count(select(func.count(CoachMessage.id)).where(CoachMessage.source == "LLM")),
             "model_versions": [{"model_version": v, "users": n} for v, n in versions],
-            "recent_admin_logs": [{"action": g.action, "target": g.target, "created_at": g.created_at.isoformat()} for g in logs]}
+            "recent_admin_logs": [{"action": g.action, "target": g.target, "created_at": iso(g.created_at)} for g in logs]}

@@ -2,11 +2,13 @@
 import datetime as dt
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import api_error
 from app.models.tables import Checkin, DailyChallenge, HealthLog, RiskPrediction, User, now
 from app.services import prediction_service as pred
+from app.models.tables import iso
 
 LOG_FIELDS = ("weight", "waist_size", "pressure_systolic", "pressure_diastolic")
 DISEASE_LABELS = {"HYPERTENSION": "고혈압", "DIABETES": "당뇨", "DYSLIPIDEMIA": "이상지질혈증"}
@@ -15,7 +17,7 @@ TRENDS = [("weight", "체중", "kg"), ("waist_size", "허리둘레", "cm"), ("pr
 
 def log_out(log: HealthLog, recalculated: bool | None = None) -> dict:
     out = {"health_log_id": log.id, "log_date": log.log_date.isoformat(), **{f: getattr(log, f) for f in LOG_FIELDS},
-           "created_at": log.created_at.isoformat()}
+           "created_at": iso(log.created_at)}
     if recalculated is not None:
         out["recalculated"] = recalculated
     return out
@@ -33,11 +35,19 @@ def save_log(db: Session, user: User, body) -> tuple[dict, bool]:
     values = {f: getattr(body, f) for f in LOG_FIELDS}
     _check(values)
     date = body.log_date or now().date()
-    log = db.scalar(select(HealthLog).where(HealthLog.user_id == user.user_id, HealthLog.log_date == date))
+    if date > now().date():
+        raise api_error(400, "VALIDATION_ERROR", "미래 날짜로는 기록할 수 없어요")
+    find = select(HealthLog).where(HealthLog.user_id == user.user_id, HealthLog.log_date == date)
+    log = db.scalar(find)
     created = log is None
     if created:
         log = HealthLog(user_id=user.user_id, log_date=date)
         db.add(log)
+        try:
+            db.flush()
+        except IntegrityError:  # 같은 순간에 다른 요청이 먼저 만듦 → 그 기록을 고침
+            db.rollback()
+            log, created = db.scalar(find), False
     body_changed = any(values[f] is not None and values[f] != getattr(log, f) for f in ("weight", "waist_size"))
     for f, v in values.items():
         if v is not None:

@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 
 from app.apis import admin, auth, challenges, predictions, questionnaires, records, safety
 from app.core.db import Base, engine
@@ -21,6 +22,11 @@ for module in (auth, questionnaires, predictions, records, challenges, safety, a
 async def http_error(_: Request, exc: HTTPException):
     body = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail), "code": "ERROR"}
     return JSONResponse(status_code=exc.status_code, content=body)
+
+
+@app.exception_handler(IntegrityError)
+async def conflict_error(_: Request, exc: IntegrityError):
+    return JSONResponse(status_code=409, content={"detail": "같은 요청이 동시에 처리됐어요. 다시 시도해 주세요.", "code": "CONFLICT"})
 
 
 @app.exception_handler(RequestValidationError)

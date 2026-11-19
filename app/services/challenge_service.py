@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import api_error
 from app.models.tables import Challenge, Checkin, CoachMessage, DailyChallenge, User, now
 from app.services import prediction_service as pred
+from app.models.tables import iso
 
 CATEGORY_LABELS = {"DIET": "식습관", "ACTIVITY": "신체활동", "SLEEP_REST": "수면·휴식", "SMOKE_DRINK": "금연·절주"}
 SEED_CHALLENGES = [
@@ -94,6 +95,8 @@ def streak(db: Session, user_id: int, today: dt.date) -> int:
 def save_checkin(db: Session, user: User, body) -> tuple[dict, bool]:
     """체크인 저장. 같은 날 다시 보내면 덮어써요 (04 대조 5 임시 결정). 예측 재계산은 하지 않습니다."""
     date = body.checkin_date or now().date()
+    if date > now().date():
+        raise api_error(400, "VALIDATION_ERROR", "미래 날짜로는 체크인할 수 없어요")
     today_missions(db, user, date)
     assigned = {d.id: d for d in db.scalars(select(DailyChallenge).where(DailyChallenge.user_id == user.user_id,
                                                                          DailyChallenge.assigned_date == date))}
@@ -110,6 +113,16 @@ def save_checkin(db: Session, user: User, body) -> tuple[dict, bool]:
     if created:
         checkin = Checkin(user_id=user.user_id, checkin_date=date)
         db.add(checkin)
+        try:
+            db.flush()
+        except IntegrityError:  # 같은 순간에 다른 요청이 먼저 만듦 → 그 체크인을 고침
+            db.rollback()
+            checkin = db.scalar(select(Checkin).where(Checkin.user_id == user.user_id, Checkin.checkin_date == date))
+            created = False
+            assigned = {d.id: d for d in db.scalars(select(DailyChallenge).where(DailyChallenge.user_id == user.user_id,
+                                                                                 DailyChallenge.assigned_date == date))}
+            for d in assigned.values():
+                d.is_completed = d.id in body.completed_daily_challenge_ids
     for f in ("sleep_hours", "mood", "refreshed", "stress", "memo", "medication_taken"):
         if getattr(body, f) is not None:
             setattr(checkin, f, getattr(body, f))
@@ -119,7 +132,7 @@ def save_checkin(db: Session, user: User, body) -> tuple[dict, bool]:
     crisis = safety_service.CRISIS if safety_service.matches(db, checkin.memo, "RISK_SIGNAL") else None
     return {"checkin_id": checkin.id, "checkin_date": date.isoformat(), "safety_alert": crisis,
             "completion_rate": round(done / len(assigned), 2) if assigned else 0.0,
-            "streak_days": streak(db, user.user_id, date), "created_at": checkin.created_at.isoformat()}, created
+            "streak_days": streak(db, user.user_id, date), "created_at": iso(checkin.created_at)}, created
 
 
 def coach_today(db: Session, user: User) -> dict:

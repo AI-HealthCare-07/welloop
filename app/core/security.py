@@ -22,7 +22,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except ValueError:  # 72바이트를 넘는 입력 등
+        return False
 
 
 def create_access_token(user_id: int) -> str:

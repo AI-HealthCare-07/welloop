@@ -11,8 +11,20 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 
 
+KST = dt.timezone(dt.timedelta(hours=9))
+
+
 def now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))  # KST
+    return dt.datetime.now(KST)
+
+
+def iso(value: dt.datetime | None) -> str | None:
+    """API 응답용 시각 문자열. DB에서 시간대 없이 읽힌 값도 +09:00을 붙여요 (공통 규칙: ISO 8601 +09:00)."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=KST)
+    return value.astimezone(KST).isoformat(timespec="seconds")
 
 
 class User(Base):
@@ -92,6 +104,7 @@ class HealthLog(Base):
 
 class RiskPrediction(Base):
     __tablename__ = "risk_predictions"
+    __table_args__ = (UniqueConstraint("user_id", "prediction_date", "disease_type"),)  # 하루 1회차, 질환당 1행
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"), index=True)
     questionnaire_id: Mapped[int] = mapped_column(ForeignKey("questionnaires.id"))

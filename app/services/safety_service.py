@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.tables import CheckupRecord, Checkin, RiskPrediction, SafetyKeyword, now
+from app.models.tables import iso
 
 SEED_KEYWORDS = [("죽고 싶", "RISK_SIGNAL"), ("자살", "RISK_SIGNAL"), ("자해", "RISK_SIGNAL"), ("사라지고 싶", "RISK_SIGNAL"),
                  ("진단", "MEDICAL_BAN"), ("처방", "MEDICAL_BAN"), ("완치", "MEDICAL_BAN"), ("당장 병원", "FAMILY_BAN")]
@@ -50,7 +51,7 @@ def checkup_out(rec: CheckupRecord) -> dict:
             "guide": ("기준을 넘는 수치가 있어요. 가까운 시일에 의료진과 상의해 보세요." if exceeded else None),
             "stale_guide": "검진을 받은 지 1년이 넘었어요. 다시 검진을 받아 보세요." if stale else None,
             "notice": "검진 수치는 기준 초과 안내에만 쓰고, 위험 신호 예측에는 넣지 않아요.",
-            "created_at": rec.created_at.isoformat()}
+            "created_at": iso(rec.created_at)}
 
 
 def latest_checkup(db: Session, user_id: int) -> CheckupRecord | None:
