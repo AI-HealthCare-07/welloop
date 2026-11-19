@@ -6,6 +6,13 @@ const view = $("#view");
 const store = { get t() { try { return sessionStorage.getItem("t"); } catch { return this._t; } },
                 set t(v) { this._t = v; try { v ? sessionStorage.setItem("t", v) : sessionStorage.removeItem("t"); } catch {} } };
 let me = null;
+const BIG_KEY = "welloop-big";
+function setBig(on) {
+  document.body.classList.toggle("big", on);
+  const b = $("#bigmode"); if (b) { b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); }
+  try { on ? localStorage.setItem(BIG_KEY, "1") : localStorage.removeItem(BIG_KEY); } catch {}
+  const my = $("#big"); if (my) my.checked = on;
+}
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const DISEASE = { HYPERTENSION: "고혈압", DIABETES: "당뇨", DYSLIPIDEMIA: "이상지질혈증" };
 const LEVEL = { LOW: "낮음", WARNING: "주의", HIGH: "높음" };
@@ -132,28 +139,42 @@ const routes = {
     const al = await alertsHtml();
     view.innerHTML = `<h1>${esc(me.name)}님, 안녕하세요</h1>${al}
       <div class="card"><h2>오늘의 코치</h2><p>${esc(coach.content)}</p><p class="sub">${esc(coach.disclaimer)}</p></div>
-      <div class="card"><h2>오늘의 미션 <span class="chip">${today.missions.filter((m) => m.completed).length} / ${today.missions.length}</span>
+      <div class="card"><h2>오늘의 미션 <span class="chip" id="m-count">${today.missions.filter((m) => m.completed).length} / ${today.missions.length}</span>
         ${today.streak_days ? `<span class="chip">${today.streak_days}일 연속</span>` : ""}</h2>
-        ${today.missions.map((m) => `<div class="mission"><span>${m.completed ? "✅" : "⬜"}</span><div><b>${esc(m.title)}</b><p class="sub">${esc(m.category_label)}</p></div></div>`).join("")}
-        <button class="btn" onclick="go('#/challenge')">체크인하기</button></div>
-      <div class="card"><h2>나의 위험 신호</h2>${latest.overall ? `<p><b>${latest.overall.score}점</b> <span class="chip ${latest.overall.grade}">${esc(latest.overall.grade_label)}</span></p>` : `<p>관리 중인 질환을 꾸준히 돌보고 있어요.</p>`}
-        <button class="btn ghost" onclick="go('#/result')">결과 다시 보기</button></div>`; },
+        ${today.missions.map((m) => `<label class="mission"><input type="checkbox" class="hm" value="${m.daily_challenge_id}" ${m.completed ? "checked" : ""}>
+          <div><b>${esc(m.title)}</b><p class="sub">${esc(m.category_label)}</p></div></label>`).join("")}
+        <p id="m-msg" class="sub">체크하면 바로 저장돼요.</p>
+        <button class="btn ghost" onclick="go('#/challenge')">수면·기분도 기록하기</button></div>
+      <div class="card" id="risk-card"><h2>나의 위험 신호</h2>${latest.overall ? `<p><b>${latest.overall.score}점</b> <span class="chip ${latest.overall.grade}">${esc(latest.overall.grade_label)}</span></p>` : `<p>관리 중인 질환을 꾸준히 돌보고 있어요.</p>`}
+        <button class="btn ghost" onclick="go('#/result')">결과 다시 보기</button></div>`;
+    const boxes = [...document.querySelectorAll(".hm")];
+    boxes.forEach((b) => b.onchange = async () => {
+      try {
+        const r = await api("/checkins", "POST", { completed_daily_challenge_ids: boxes.filter((x) => x.checked).map((x) => Number(x.value)) });
+        $("#m-count").textContent = `${boxes.filter((x) => x.checked).length} / ${boxes.length}`;
+        $("#m-msg").textContent = `저장했어요 · ${r.streak_days}일 연속`;
+      } catch (e) { b.checked = !b.checked; $("#m-msg").textContent = e.message; }
+    }); },
 
-  challenge: async () => { const t = await api("/challenges/today");
+  challenge: async () => { const t = await api("/challenges/today"); const saved = t.checkin || {};
     view.innerHTML = `<h1>오늘의 실천을<br>체크해 주세요</h1>
       <div class="card"><h2>추천 생활습관</h2>${t.recommended_categories.map((c) => `<p><span class="chip">${esc(c.label)}</span> <span class="sub">${esc(c.reason)}</span></p>`).join("")}</div>
       <div class="card"><h2>오늘의 미션</h2>${t.missions.map((m) => `<label class="mission"><input type="checkbox" class="m" value="${m.daily_challenge_id}" ${m.completed ? "checked" : ""}>
         <div><b>${esc(m.title)}</b><p class="sub">${esc(m.description)}</p></div></label>`).join("")}</div>
-      <div class="card"><h2>오늘의 컨디션 · 선택</h2><div class="row"><div><label>어젯밤 수면 (시간)</label><input id="sleep" type="number" step="0.5" min="0" max="24"></div>
-        <div><label>기분</label><select id="mood"><option value="">선택</option><option value="1">나쁨</option><option value="2">조금 나쁨</option><option value="3">보통</option><option value="4">좋음</option><option value="5">아주 좋음</option></select></div></div>
-        <label class="check"><input id="med" type="checkbox">오늘 약을 챙겼어요 (복용 중인 경우)</label>
-        <label>오늘의 한 줄 메모 · 선택</label><input id="memo" type="text" maxlength="200" placeholder="나만 보는 메모예요"></div><div id="safety"></div>
+      <div class="card"><h2>오늘의 컨디션 · 선택</h2>
+        <label>어젯밤 수면 (시간)</label><input id="sleep" type="number" step="0.5" min="0" max="24" value="${saved.sleep_hours ?? ""}">
+        <label>오늘 하루 전반적인 기분</label>
+        <select id="mood"><option value="">선택 안 함</option><option value="1">많이 힘들어요</option><option value="2">조금 힘들어요</option><option value="3">그저 그래요</option><option value="4">괜찮아요</option><option value="5">아주 좋아요</option></select>
+        <p class="sub">수면과 상관없이, 오늘 하루를 전체로 보고 골라 주세요. 힘든 날이 이어지면 상담 안내를 보여 드려요.</p>
+        <label class="check"><input id="med" type="checkbox" ${saved.medication_taken ? "checked" : ""}>오늘 약을 챙겼어요 (복용 중인 경우)</label>
+        <label>오늘의 한 줄 메모 · 선택</label><input id="memo" type="text" maxlength="200" placeholder="나만 보는 메모예요" value="${esc(saved.memo ?? "")}"></div><div id="safety"></div>
       <p id="err" class="error"></p><button class="btn" id="go">체크인 저장</button><p class="sub">못 한 날이 있어도 괜찮아요. 다시 시작하면 됩니다.</p>`;
+    if (saved.mood) $("#mood").value = saved.mood;
     $("#go").onclick = async () => { try {
       const r = await api("/checkins", "POST", { completed_daily_challenge_ids: [...document.querySelectorAll(".m:checked")].map((x) => Number(x.value)),
                                                sleep_hours: num("sleep"), mood: num("mood"), medication_taken: chk("med") ? true : null, memo: val("memo") });
       $("#safety").innerHTML = r.safety_alert ? alertCard(r.safety_alert) : "";
-      $("#err").style.color = "var(--green)"; $("#err").textContent = `저장했어요. 오늘 실천율 ${Math.round(r.completion_rate * 100)}% · ${r.streak_days}일 연속`;
+      $("#err").style.color = "var(--green)"; $("#err").textContent = `저장했어요. 오늘 실천율 ${Math.round(r.completion_rate * 100)}% · ${r.streak_days}일 연속 (다시 들어와도 남아 있어요)`;
     } catch (e) { showErr(e); } }; },
 
   record: async () => { const logs = await api("/health-logs?period=3m&size=10");
@@ -196,33 +217,51 @@ const routes = {
     $("#go").onclick = async () => { try { const ch = { activity_days_per_week: num("act"), sleep_hours: num("sl") }; if (num("wa") != null) ch.waist_size = num("wa");
       Object.keys(ch).forEach((k) => ch[k] == null && delete ch[k]);
       const s = await api("/predictions/simulate", "POST", { changes: ch });
-      $("#out").innerHTML = `<div class="card"><h2>가상 비교 미리보기</h2><div class="big-num">${s.overall.current} → ${s.overall.simulated}</div>
+      const diff = s.overall.diff, word = diff < 0 ? `${Math.abs(diff)}점 낮아져요` : diff > 0 ? `${diff}점 높아져요` : "점수는 그대로예요";
+      $("#out").innerHTML = `<div class="card"><h2>가상 비교 미리보기</h2><p class="sub">대사 건강 위험 신호 점수 (0~100, 높을수록 위험)</p>
+        <div class="big-num">${s.overall.current} → ${s.overall.simulated}</div><p><span class="chip ${diff < 0 ? "" : "WARNING"}">${word}</span></p>
         ${s.changes.map((c) => `<p class="sub">${esc(c.label)}: 현재 ${c.current ?? "-"} → 가정 ${c.assumed}${esc(c.unit || "")}</p>`).join("")}<p class="sub">${esc(s.notice)}</p></div>`;
     } catch (e) { showErr(e); } }; },
 
   my: () => { view.innerHTML = `<h1>내 정보·설정</h1><div class="card"><div class="list-row"><span>이름</span><b>${esc(me.name)}</b></div>
       <div class="list-row"><span>이메일</span><span>${esc(me.email)}</span></div><div class="list-row"><span>생년월일</span><span>${esc(me.birth_date)}</span></div></div>
       <label class="check"><input id="big" type="checkbox" ${document.body.classList.contains("big") ? "checked" : ""}>큰 글씨 모드</label>
+      <p class="sub">화면 맨 위 "가가" 버튼으로도 바꿀 수 있어요.</p>
       <button class="btn ghost" id="re">재문진하기</button><button class="btn text" id="out">로그아웃</button>`;
-    $("#big").onchange = (e) => document.body.classList.toggle("big", e.target.checked);
+    $("#big").onchange = (e) => setBig(e.target.checked);
     $("#re").onclick = () => { Q.step = 1; Q.recheck = true; go("#/q"); };
     $("#out").onclick = () => { store.t = null; me = null; Q.data = {}; Q.step = 1; Q.recheck = false; go("#/"); }; },
 };
 
-function checkupCard(c) { return `<div class="card"><h2>검진 수치 확인</h2>${c.exceeded.length ? c.exceeded.map((e) => `<div class="list-row"><span>${esc(e.label)}</span><span class="chip WARNING">${e.value} · 기준 ${esc(e.reference)}</span></div>`).join("") + `<p>${esc(c.guide)}</p>` : `<p>기준을 넘는 수치가 없어요.</p>`}
-  ${c.is_stale ? `<p class="sub">${esc(c.stale_guide)}</p>` : ""}<p class="sub">의학적 진단이 아니며 정확한 판단은 의료진과 상담하세요.</p></div>`; }
+const STATUS_LABEL = { NORMAL: "정상 범위", CAUTION: "주의 범위", EXCEEDED: "기준 초과" };
+function checkupCard(c) {
+  if (!c.items.length) return `<div class="card"><h2>검진 수치 확인</h2><p class="sub">입력한 수치가 없어요.</p></div>`;
+  return `<div class="card"><h2>검진 수치 확인</h2>
+    ${c.items.map((e) => `<div class="list-row"><span>${esc(e.label)}<br><span class="sub">${esc(e.reference)}</span></span>
+      <span style="text-align:right;white-space:nowrap">${e.value} ${esc(e.unit)}<br><span class="chip ${e.status}">${STATUS_LABEL[e.status]}</span></span></div>`).join("")}
+    ${c.guide ? `<p>${esc(c.guide)}</p>` : c.caution_guide ? `<p>${esc(c.caution_guide)}</p>` : `<p>입력한 수치는 모두 정상 범위예요.</p>`}
+    ${c.is_stale ? `<p class="sub">${esc(c.stale_guide)}</p>` : ""}
+    <p class="sub">${esc(c.notice)} 의학적 진단이 아니며 정확한 판단은 의료진과 상담하세요.</p></div>`;
+}
 function alertMsg(text) { const n = document.createElement("div"); n.className = "notice"; n.textContent = text; view.prepend(n); }
 
 /* ----- 문진 4단계 (B01~B04) ----- */
 const Q = { step: 1, data: {}, recheck: false };
+const WAIST = { cm: [40, 200], inch: [16, 78] };  // 서버 검사 범위(cm)와 같은 값
 const yn3 = (id, label) => `<label>${label}</label><select id="${id}"><option value="UNKNOWN">잘 모르겠어요</option><option value="NO">없음</option><option value="YES">있음</option></select>`;
 const STEPS = {
-  1: () => `<h1>먼저, 기본 정보를<br>알려 주세요</h1><div class="row"><div><label>키 (cm)</label><input id="height" type="number" step="0.1"></div><div><label>몸무게 (kg)</label><input id="weight" type="number" step="0.1"></div></div>
-      <label>허리둘레 (cm)</label><input id="waist_size" type="number" step="0.1"><p class="sub">배꼽 높이에서 숨을 내쉰 뒤 잰 값이에요.</p>
+  1: () => `<h1>먼저, 기본 정보를<br>알려 주세요</h1><div class="row"><div><label>키 (cm)</label><input id="height" type="number" step="1" min="100" max="220" placeholder="예: 162"></div>
+      <div><label>몸무게 (kg)</label><input id="weight" type="number" step="0.5" min="20" max="250" placeholder="예: 61"></div></div>
+      <p id="bmi" class="sub">키와 몸무게를 넣으면 체질량지수(BMI)가 자동으로 계산돼요.</p>
+      <label id="waist-label">허리둘레 (cm)</label>
+      <div class="unit-toggle"><button type="button" id="u-cm" class="on">cm로 입력</button><button type="button" id="u-in">바지 사이즈(인치)</button></div>
+      <input id="waist_size" type="number" step="0.5" min="40" max="200" placeholder="예: 82" style="margin-top:8px">
+      <p id="waist-help" class="sub">배꼽 높이에서 숨을 내쉰 뒤 잰 값이에요. 줄자가 없으면 바지 사이즈로 넣어도 돼요.</p>
+      <p id="waist-err" class="error"></p>
       <h2 style="margin-top:18px">진단받았거나 약을 먹고 있는 질환</h2>
       <label class="check"><input id="htn_diagnosed" type="checkbox">고혈압</label><label class="check"><input id="dm_diagnosed" type="checkbox">당뇨</label>
       <label class="check"><input id="dl_diagnosed" type="checkbox">이상지질혈증</label><p class="sub">해당 질환은 예측 대신 생활 관리 현황을 보여 드려요.</p>`,
-  2: () => `<h1>평소 생활 습관을<br>함께 살펴볼게요</h1><label>흡연</label><select id="smoking_status"><option value="NEVER">비흡연</option><option value="FORMER">과거 흡연</option><option value="CURRENT">현재 흡연</option></select>
+  2: () => `<h1>평소 생활 습관을<br>함께 살펴볼게요</h1><p class="sub">해당 없으면 <b>0</b>을 넣어 주세요. 비워 두면 다음으로 넘어가지 않아요.</p><label>흡연</label><select id="smoking_status"><option value="NEVER">비흡연</option><option value="FORMER">과거 흡연</option><option value="CURRENT">현재 흡연</option></select>
       <div class="row"><div><label>음주 (주 며칠)</label><input id="drinking_days_per_week" type="number" min="0" max="7"></div><div><label>1회 음주량 (잔)</label><input id="drinks_per_occasion" type="number" min="0" max="30"></div></div>
       <div class="row"><div><label>운동 (주 며칠)</label><input id="activity_days_per_week" type="number" min="0" max="7"></div><div><label>하루 운동 (분)</label><input id="activity_minutes_per_day" type="number" min="0" max="600"></div></div>
       <div class="row"><div><label>채소 (주 몇 번)</label><input id="veg_freq" type="number" min="0" max="21"></div><div><label>아침식사 (주 며칠)</label><input id="breakfast_freq" type="number" min="0" max="7"></div></div>
@@ -233,6 +272,7 @@ const STEPS = {
       <p class="sub">예: 심장·관절 문제로 무리한 운동을 피하라고 들은 경우예요. 체크하면 강도 높은 미션은 빼고 추천해요.</p>`,
   4: () => `<h1>마지막으로,<br>맞춤 설정이에요</h1>${me?.gender === "FEMALE" ? `<label>폐경 상태</label><select id="menopause_status"><option value="">선택 안 함</option><option value="PRE">폐경 전</option><option value="PERI">진행 중</option><option value="POST">폐경 후</option></select>` : ""}
       <label>가장 바꾸고 싶은 생활습관</label><input id="improvement_goal" type="text" maxlength="100" placeholder="예: 저녁 식사 후 걷기">
+      <div class="ex">${["저녁 식사 후 걷기", "국물 덜 먹기", "단 음료 줄이기", "11시 전에 잠들기", "담배 줄이기", "술자리 줄이기"].map((x) => `<button type="button" class="ex-btn">${x}</button>`).join("")}</div>
       <div class="card" style="margin-top:16px"><h2>다음 단계 안내</h2><p class="sub">입력한 내용으로 위험 신호를 살펴봅니다. 의학적 진단이 아니에요.</p></div>`,
 };
 function collect() { view.querySelectorAll("input,select").forEach((el) => {
@@ -241,9 +281,58 @@ function renderQuestionnaire() {
   view.innerHTML = `<p class="sub">건강 문진 ${Q.step} / 4</p><div class="steps">${[1, 2, 3, 4].map((i) => `<i class="${i <= Q.step ? "on" : ""}"></i>`).join("")}</div>${STEPS[Q.step]()}
     <p id="err" class="error"></p><button class="btn" id="next">${Q.step < 4 ? "다음" : "결과 확인하기"}</button>${Q.step > 1 ? `<button class="btn text" id="prev">이전</button>` : ""}`;
   view.querySelectorAll("input,select").forEach((el) => { const v = Q.data[el.id]; if (v == null) return; el.type === "checkbox" ? (el.checked = v) : (el.value = v); });
+  if (Q.step === 1) {
+    const showBmi = () => { const h = num("height"), w = num("weight");
+      $("#bmi").textContent = h && w ? `체질량지수(BMI) ${(w / (h / 100) ** 2).toFixed(1)}` : "키와 몸무게를 넣으면 체질량지수(BMI)가 자동으로 계산돼요."; };
+    ["height", "weight"].forEach((id) => $("#" + id).oninput = showBmi); showBmi();
+    // 허리둘레: 단위를 바꿔도 값이 유지되고, 이 단계에서 바로 범위를 확인해요
+    const toCm = (v) => Math.round(v * 2.54 * 2) / 2, toIn = (v) => Math.round(v / 2.54);
+    const checkWaist = () => {
+      const v = num("waist_size"), cm = v == null ? null : Q.inch ? toCm(v) : v;
+      const el = $("#waist-err"), hint = $("#waist-hint");
+      if (v == null) { el.textContent = ""; if (hint) hint.textContent = ""; return true; }
+      if (hint) hint.textContent = Q.inch ? `${v}인치 ≈ ${cm}cm 로 저장돼요` : `${v}cm ≈ ${toIn(v)}인치`;
+      if (!Q.inch && v < WAIST.cm[0]) {
+        if (hint) hint.textContent = "";  // 아래 안내에 환산값이 들어가서 중복을 없애요
+        el.innerHTML = `허리둘레는 cm로 넣어 주세요. 바지 사이즈(인치)라면 <b>${v}인치 ≈ ${toCm(v)}cm</b> 예요 — 위의 "바지 사이즈(인치)" 버튼을 눌러 주세요.`;
+        return false;
+      }
+      const [lo, hi] = Q.inch ? WAIST.inch : WAIST.cm;
+      el.textContent = v < lo || v > hi ? `허리둘레는 ${lo}~${hi}${Q.inch ? "인치" : "cm"} 사이로 넣어 주세요.` : "";
+      return !el.textContent;
+    };
+    const unit = (inch) => { Q.inch = inch; $("#u-in").classList.toggle("on", inch); $("#u-cm").classList.toggle("on", !inch);
+      const el = $("#waist_size"), v = num("waist_size");
+      const [lo, hi] = inch ? WAIST.inch : WAIST.cm;
+      el.step = inch ? 1 : 0.5; el.min = lo; el.max = hi; el.placeholder = inch ? "예: 32" : "예: 82";
+      $("#waist-label").textContent = inch ? "허리둘레 (인치 · 바지 사이즈)" : "허리둘레 (cm)";
+      // cm 칸에 인치 값(40 미만)을 넣고 인치로 바꾸면, 이미 인치로 적은 값이라 보고 그대로 둬요
+      if (v) el.value = inch ? (v < WAIST.cm[0] ? v : toIn(v)) : toCm(v);
+      $("#waist-help").innerHTML = inch
+        ? `바지 사이즈로 넣으면 cm로 바꿔 저장해요. 1인치 = 2.54cm <span id="waist-hint" class="sub"></span>`
+        : `배꼽 높이에서 숨을 내쉰 뒤 잰 값이에요. 줄자가 없으면 바지 사이즈로 넣어도 돼요. <span id="waist-hint" class="sub"></span>`;
+      checkWaist();
+    };
+    $("#u-cm").onclick = () => unit(false); $("#u-in").onclick = () => unit(true);
+    $("#waist_size").oninput = checkWaist;
+    unit(!!Q.inch);
+  }
+  if (Q.step === 4) view.querySelectorAll(".ex-btn").forEach((b) => b.onclick = () => { $("#improvement_goal").value = b.textContent; });
   if ($("#prev")) $("#prev").onclick = () => { collect(); Q.step--; renderQuestionnaire(); };
   $("#next").onclick = async () => { collect();
-    if (Q.step === 1 && !(Q.data.height && Q.data.weight && Q.data.waist_size)) return showErr(new Error("키·몸무게·허리둘레를 입력해 주세요"));
+    if (Q.step === 1) {
+      if (!(Q.data.height && Q.data.weight && Q.data.waist_size)) return showErr(new Error("키·몸무게·허리둘레를 입력해 주세요"));
+      if ($("#waist-err").textContent) return showErr(new Error("허리둘레를 확인해 주세요"));
+      for (const [id, name, lo, hi, unit] of [["height", "키", 100, 220, "cm"], ["weight", "몸무게", 20, 250, "kg"]])
+        if (Q.data[id] < lo || Q.data[id] > hi) return showErr(new Error(`${name}는 ${lo}~${hi}${unit} 사이로 넣어 주세요.`));
+      if (Q.inch) Q.data.waist_size = Math.round(Q.data.waist_size * 2.54 * 2) / 2;  // 인치 → cm로 바꿔 저장
+      const w = Q.data.waist_size;
+      if (w < WAIST.cm[0] || w > WAIST.cm[1]) return showErr(new Error(`허리둘레는 ${WAIST.cm[0]}~${WAIST.cm[1]}cm 사이로 넣어 주세요.`));
+    }
+    if (Q.step === 2) {
+      const need = ["drinking_days_per_week", "drinks_per_occasion", "activity_days_per_week", "activity_minutes_per_day", "veg_freq", "breakfast_freq", "sleep_hours"];
+      if (need.some((k) => Q.data[k] == null)) return showErr(new Error("해당 없으면 0을 넣어 주세요. 빈칸이 있으면 넘어갈 수 없어요."));
+    }
     if (Q.step < 4) { Q.step++; return renderQuestionnaire(); }
     try { const d = Q.data;
       const body = { ...d, htn_medication: d.htn_diagnosed, dm_medication: d.dm_diagnosed, dl_medication: d.dl_diagnosed, is_completed: true, is_recheck: Q.recheck };
@@ -260,5 +349,7 @@ async function render() {
   try { await (routes[name] || routes[""])(); } catch (e) { view.innerHTML = `<div class="card"><h2>화면을 불러오지 못했어요</h2><p class="sub">${esc(e.message)}</p></div>`; }
   window.scrollTo(0, 0);
 }
+try { if (localStorage.getItem(BIG_KEY)) setBig(true); } catch {}
+$("#bigmode").onclick = () => setBig(!document.body.classList.contains("big"));
 $("#logo").onclick = (e) => { e.preventDefault(); go(store.t ? "#/home" : "#/"); if (location.hash === (store.t ? "#/home" : "#/")) render(); };
 window.addEventListener("hashchange", render); window.go = go; render();

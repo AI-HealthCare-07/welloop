@@ -93,3 +93,31 @@ def test_admin_challenges_and_keywords():
     assert client.post("/api/v1/checkins", json={"memo": "이제 다 끝내고 싶어"}, headers=h).json()["safety_alert"]
     assert client.delete(f"/api/v1/admin/safety-keywords/{k.json()['keyword_id']}", headers=a).status_code == 204
     assert client.post("/api/v1/checkins", json={"memo": "이제 다 끝내고 싶어"}, headers=h).json()["safety_alert"] is None
+
+
+def test_checkup_shows_three_states_with_reference():
+    """11/19 피드백: 정상보다 높은데 '기준 초과 없음'만 떠서 혼란 → 정상·주의·기준 초과를 구분해 보여줘요."""
+    h, _ = ready_user("c4@example.com")
+    r = client.post("/api/v1/checkups", json={"pressure_systolic": 130, "pressure_diastolic": 85,
+                                              "total_cholesterol": 185, "hba1c": 6.0, "hdl_cholesterol": 45}, headers=h).json()
+    state = {i["field"]: i["status"] for i in r["items"]}
+    assert state == {"pressure_systolic": "CAUTION", "pressure_diastolic": "CAUTION",
+                     "total_cholesterol": "NORMAL", "hba1c": "CAUTION", "hdl_cholesterol": "CAUTION"}
+    assert r["exceeded"] == [] and r["guide"] is None and r["caution_guide"]
+    ref = next(i["reference"] for i in r["items"] if i["field"] == "pressure_systolic")
+    assert "주의 120~139" in ref and "기준 초과 140 이상" in ref
+    assert "주의 5.7~6.4" in next(i["reference"] for i in r["items"] if i["field"] == "hba1c")
+    assert "주의 40~49" in next(i["reference"] for i in r["items"] if i["field"] == "hdl_cholesterol")
+    # 기준을 넘으면 주의 안내 대신 상담 권유
+    hi = client.post("/api/v1/checkups", json={"pressure_systolic": 152}, headers=h).json()
+    assert hi["items"][0]["status"] == "EXCEEDED" and hi["guide"] and hi["caution_guide"] is None
+    assert "CHECKUP_EXCEEDED" in [a["type"] for a in client.get("/api/v1/safety/alerts", headers=h).json()["items"]]
+
+
+def test_today_returns_saved_checkin_for_restore():
+    """11/19 피드백: 체크인 저장 후 다시 들어오면 컨디션이 비어 보이던 문제."""
+    h, _ = ready_user("c5@example.com")
+    assert client.get("/api/v1/challenges/today", headers=h).json()["checkin"] is None
+    client.post("/api/v1/checkins", json={"sleep_hours": 7.5, "mood": 2, "medication_taken": True, "memo": "조금 피곤"}, headers=h)
+    saved = client.get("/api/v1/challenges/today", headers=h).json()["checkin"]
+    assert saved["sleep_hours"] == 7.5 and saved["mood"] == 2 and saved["medication_taken"] is True and saved["memo"] == "조금 피곤"
