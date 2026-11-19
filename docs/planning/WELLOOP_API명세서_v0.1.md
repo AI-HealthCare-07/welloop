@@ -685,205 +685,373 @@
 
 ---
 
-<!-- 03 START · 평가·대시보드 · 담당: ______ -->
+<!-- 03 START · 평가·대시보드 · 담당: 김도엽 -->
 ## 03. 평가·대시보드 (예측·기록)
 
-담당: ______ · 관련 화면: C01~C07
+담당: 김도엽 · 관련 화면: C01~C07 · 기준: ERD v1.3 (`risk_predictions`, `health_logs`, `risk_thresholds`) + Figma 프로토타입 C01~C07
 
-### 9. 위험 예측(미진단) / 관리 평가(기진단) 실행
+> 03 구역 공통
+> - Enum 값은 ERD와 같은 **대문자**로 주고받습니다. `disease_type`: HYPERTENSION / DIABETES / DYSLIPIDEMIA · `risk_level`: LOW / WARNING / HIGH
+> - 필드명은 ERD 컬럼명 그대로 씁니다 (`weight`, `waist_size`, `pressure_systolic`, `pressure_diastolic`, `activity_days_per_week`, `sleep_hours`).
+> - **예측 입력** = 최근 완료 문진 + 재계산 규칙(REQ-007)에 따른 최신값입니다.
+>   - 체중·허리둘레: `health_logs` 최신값 (없으면 문진 값)
+>   - 수면 시간: `checkins` **최근 14일 중 7일 이상** 기록이 있으면 그 평균, 7일 미만이면 문진 값을 그대로 씁니다. 수면은 하루하루 변동이 커서 기록이 충분히 쌓였을 때만 반영합니다.
+>   - 흡연·음주·신체활동·식습관·가족력: 최근 문진 (2주마다 1분 재문진으로 갱신)
+>   - **쓰지 않는 값**: 검진 수치(`checkup_records`)와 혈압·혈당 기록. 질환 라벨을 정하는 값이라 입력에 넣으면 라벨 누수가 됩니다. 검진 수치는 규칙 기반 "기준 초과 안내"에만 씁니다.
+>   - 실제 계산에 쓴 값과 출처는 `risk_predictions.input_snapshot`에 남깁니다.
+> - **재계산 시점** (REQ-007, 하루 최대 1회)
+>   - 바로 재계산: 첫 문진·재문진 완료(No 9), 체중·허리둘레 기록(No 17)
+>   - 주기 재계산: 수면은 체크인할 때마다 재계산하지 않습니다. 주 1회(월요일 새벽) 서버가 아래 순서로 처리합니다. (04 구역은 체크인 저장만 담당, 대조 결과 11 합의)
+>     1. 이번 주에 적용할 수면 값을 정합니다: 최근 14일 중 7일 이상 기록이 있으면 평균, 7일 미만이면 문진 값. 기록이 줄어 평균에서 문진 값으로 바뀌는 경우도 같은 방식으로 정합니다.
+>     2. 이 값을 직전 예측의 입력 수면 값(`input_snapshot`)과 비교해 0.5시간 이상 차이 날 때만 새로 계산하고 이력을 남깁니다(`reason`: SLEEP_CHECKIN).
+>   - 같은 날 이미 계산했다면 그날은 다시 계산하지 않고, 바뀐 값은 다음 재계산 때 반영합니다.
+>   - 혈압·혈당 기록, 기분·복약 체크인은 예측 입력이 아니라 재계산하지 않습니다.
+> - **점수 방향**: 질환별 `risk_score`(0~1)와 종합 `overall.score`(0~100) 모두 **높을수록 위험 신호가 큽니다.**
+> - **화면 분기**: 미진단 질환이 하나라도 있으면 C01, 세 질환 모두 관리 중이면 C02. 일부만 관리 중인 사용자는 C01을 보되, 관리 중인 질환은 C01 안의 "관리 중인 질환" 카드에서 C02(No 19-1)로 연결합니다.
+> - 화면 문구는 "위험 신호"이고 진단·치료 효과처럼 읽히는 표현은 쓰지 않습니다 (NFR-014). 모든 결과 응답에 `disclaimer`를 넣습니다.
+> - ⚠️ 표시는 **ERD v1.3에 없는데 Figma 화면에는 있는 값**입니다. 구역 맨 아래 "ERD 대조 결과" 표에 모아 두었습니다.
+
+### 9. 위험 신호 예측 실행 · MVP
 - Method / Endpoint: `POST /api/v1/predictions`
+- Description: 문진을 마친 뒤 3개 질환의 위험 신호를 계산해 저장한다. 입력은 공통 규칙의 "예측 입력"대로 문진에 최신 기록값을 합친 것이다. 진단받았거나 약을 먹는 질환은 예측하지 않고 `is_managed: true`로 돌려준다. 미진단 질환이 하나라도 있으면 C01, 모두 관리 중이면 C02로 보낸다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
+- Request Header: `Content-Type: application/json` / `Authorization: Bearer {access_token}`
+- Request Parameter: -
 - Request Body:
 
   ```json
-  {
-    "questionnaire_id": 5,
-    "checkup_id": 3,
-    "mode": "risk_prediction"
-  }
+  { "questionnaire_id": 5 }
   ```
-- Response Body (성공 예시 = Mock Data):
+- Response Body (201):
 
   ```json
   {
-    "prediction_id": 7,
-    "mode": "risk_prediction",
-    "results": [
-      {
-        "disease": "hypertension",
-        "risk_level": "medium",
-        "risk_score": 0.42,
-        "top_factors": [
-          "체중",
-          "수면 부족"
-        ]
-      }
+    "prediction_date": "2026-11-18",
+    "view": "RISK",
+    "overall": { "score": 62, "score_max": 100, "grade": "WARNING", "grade_label": "관리 권장", "basis_disease_type": "DIABETES" },
+    "managed_diseases": ["HYPERTENSION"],
+    "input_count": 8,
+    "input_sources": { "questionnaire_id": 5, "weight": "HEALTH_LOG", "waist_size": "QUESTIONNAIRE", "sleep_hours": "CHECKIN_14D" },
+    "factors": [
+      { "code": "activity_days_per_week", "label": "운동 시간 부족", "is_missing": false },
+      { "code": "sleep_hours", "label": "수면 시간 부족", "is_missing": false },
+      { "code": "waist_size", "label": "허리둘레", "is_missing": false },
+      { "code": "family_htn", "label": "가족력은 미확인", "is_missing": true }
     ],
-    "disclaimer": "진단이 아닌 참고용 정보입니다.",
+    "results": [
+      { "prediction_id": 21, "disease_type": "HYPERTENSION", "is_managed": true, "risk_score": null, "risk_level": null, "major_factors": [] },
+      { "prediction_id": 22, "disease_type": "DIABETES", "is_managed": false, "risk_score": 0.62, "risk_level": "WARNING", "major_factors": ["waist_size", "family_dm", "activity_days_per_week"] },
+      { "prediction_id": 23, "disease_type": "DYSLIPIDEMIA", "is_managed": false, "risk_score": 0.18, "risk_level": "LOW", "major_factors": ["waist_size"] }
+    ],
+    "model_version": "risk-v0.1",
+    "disclaimer": "진단·치료 판단에 사용할 수 없으며, 정확한 판단은 의료진과 상담하세요.",
     "created_at": "2026-11-18T10:15:00+09:00"
   }
   ```
-- Status Code: 성공: 201 Created / 400 questionnaire_id 누락 / 401 토큰 없음·만료 / 404 문진 기록 없음 / 409 AI 처리 동의 없음 / 503 예측 모델 오류
-- 관련 테이블 · REQ: risk_predictions · REQ-006·035
-- 우선순위: MVP
-- 비고: mode: risk_prediction(미진단) / management_evaluation(기진단). 수치는 코드로 계산, LLM은 설명 문구만
+- Status Code: 201 Created / 400 `questionnaire_id` 누락·문진 미완료(`is_completed=false`) / 401 토큰 없음·만료 / 404 문진 기록 없음 / 409 건강정보 동의 없음(→ 확인 필요 11) · 오늘 이미 계산함(하루 최대 1회, 기존 결과를 그대로 반환할지 팀 결정) / 500 예측 모델 오류
+- 관련 테이블 · REQ: risk_predictions, questionnaires, risk_thresholds · REQ-006·007·035
+- 관련 화면: C01 (전부 관리 중이면 C02)
+- 종합 점수(`overall`) 산출 규칙 · 제안 (예측 모델 담당 확정 예정)
+  1. 대상은 `is_managed: false`인 질환만입니다. 관리 중인 질환은 계산에서 뺍니다. 셋 다 관리 중이면 `overall`은 `null`이고 `view`는 MANAGEMENT입니다.
+  2. 대상 질환 중 **위험 단계(`risk_level`)가 가장 높은 질환**을 기준으로 삼고, 단계가 같으면 `risk_score`가 큰 쪽을 고릅니다. 이 질환이 `basis_disease_type`입니다.
+  3. `score` = 기준 질환의 `risk_score` × 100 (정수 반올림), `grade` = 기준 질환의 `risk_level`. 점수와 등급이 같은 질환에서 나오므로 서로 어긋나지 않습니다.
+  4. 평균을 쓰지 않는 이유: 한 질환의 위험 신호가 높아도 나머지 두 질환이 낮으면 평균에 묻혀 버립니다.
+  5. 전제: 질환별 모델 확률은 보정(calibration)해서 0~1의 의미를 맞춥니다. 단계 경계값은 질환별 `risk_thresholds`를 씁니다.
+  6. `grade_label`(안): LOW "양호" · WARNING "관리 권장" · HIGH "상담 권장". 진단처럼 읽히지 않는지 문구 확정 필요(NFR-014).
+- 재계산: 이 API는 사용자가 문진(첫 문진·재문진)을 마쳤을 때 호출합니다. 체중·허리둘레 기록과 수면 평균 변화에 따른 재계산은 서버가 공통 규칙의 "재계산 시점"대로 실행하고 새 이력을 남깁니다(사유는 No 10의 `reason`).
+- 비고:
+  - 초안의 `mode`(요청)와 `checkup_id`를 뺐습니다. 미진단/기진단은 사용자가 고르는 값이 아니라 문진의 진단·복약 응답으로 서버가 질환별로 정합니다(`is_managed`). `view`는 화면 분기용: RISK(C01) / MANAGEMENT(C02).
+  - `managed_diseases`가 비어 있지 않으면 C01에 "관리 중인 질환" 카드를 띄우고 C02(No 19-1)로 연결합니다. 현재 Figma C01에는 이 카드가 없습니다. → 대조 결과 10
+  - `input_sources`는 각 입력이 어디서 왔는지(`QUESTIONNAIRE` / `HEALTH_LOG` / `CHECKIN_14D`) 보여 줍니다. 수면 기록이 14일 중 7일 미만이면 `sleep_hours`는 `QUESTIONNAIRE`입니다. `input_snapshot`에 같이 저장합니다.
+  - Figma C01 예시의 영향 요인 "최근 혈압 기록"은 쓸 수 없습니다. 혈압은 고혈압 라벨을 정하는 값이라 예측 입력이 아니기 때문입니다. 예시를 `waist_size`(허리둘레)로 바꿨고, 화면 문구도 수정이 필요합니다.
+  - `results[]`는 ERD `risk_predictions` 행(질환당 1행)과 1:1입니다. `major_factors`는 `major_factor1~3`을 배열로 묶은 것이고 값은 문진 컬럼명입니다.
+  - ⚠️ `overall`(대사 건강 위험 점수 62/100 · 관리 권장), `input_count`(입력 정보 8개 반영), `factors[].is_missing`(가족력은 미확인)은 C01에 있지만 ERD에 없습니다. → 대조 결과 1·2
+  - 수치는 코드로 계산하고 LLM은 쓰지 않습니다.
 
-### 10. 예측 이력 조회
-- Method / Endpoint: `GET /api/v1/predictions`
+### 9-1. 최근 예측 결과 조회 · MVP (추가 제안)
+- Method / Endpoint: `GET /api/v1/predictions/latest`
+- Description: 가장 최근 예측 결과를 다시 보여 준다 (C01 재진입, 홈 카드, C06 기준 결과).
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): page(기본 1), size(기본 10), from_date, to_date
-- Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: -
+- Response Body (200): No 9 응답과 동일
+- Status Code: 200 OK / 401 토큰 없음·만료 / 404 예측 이력 없음
+- 관련 테이블 · REQ: risk_predictions · REQ-006·007
+- 관련 화면: C01, C06
+- 비고: POST(No 9)는 계산을 새로 돌리므로, 화면을 다시 열 때는 이 API를 씁니다.
+
+### 10. 예측 이력 조회 · MVP
+- Method / Endpoint: `GET /api/v1/predictions`
+- Description: 날짜별 예측 이력을 최신순으로 보여 준다. 하루 최대 1회라 날짜가 한 회차다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `period`(1m | 3m | all, 기본 3m), `page`(기본 1), `size`(기본 10)
+- Response Body (200):
 
   ```json
   {
     "items": [
-      {
-        "prediction_id": 7,
-        "mode": "risk_prediction",
-        "highest_risk_level": "medium",
-        "created_at": "2026-11-18T10:15:00+09:00"
-      }
+      { "prediction_date": "2026-11-18", "overall_score": 62, "reason": "SLEEP_CHECKIN", "reason_label": "수면 기록 반영", "model_version": "risk-v0.1" },
+      { "prediction_date": "2026-11-11", "overall_score": 65, "reason": "RECHECK", "reason_label": "운동·수면 문진", "model_version": "risk-v0.1" },
+      { "prediction_date": "2026-11-04", "overall_score": 68, "reason": "HEALTH_LOG", "reason_label": "체중 기록 반영", "model_version": "risk-v0.1" },
+      { "prediction_date": "2026-10-28", "overall_score": 72, "reason": "INITIAL", "reason_label": "첫 문진 결과", "model_version": "risk-v0.1" }
     ],
-    "total": 1,
+    "total": 4,
     "page": 1,
-    "size": 10
+    "size": 10,
+    "model_version_changed": false
   }
   ```
-- Status Code: 성공: 200 OK / 400 날짜 형식 오류 / 401 토큰 없음·만료
+- Status Code: 200 OK / 400 `period` 값 오류 / 401 토큰 없음·만료
 - 관련 테이블 · REQ: risk_predictions · REQ-007
-- 우선순위: MVP
+- 관련 화면: C03
+- 비고:
+  - C03 카드 = 날짜 · 점수 · 다시 계산된 이유. 초안의 `from_date`·`to_date`는 화면의 기간 선택(최근 3개월 ▼)에 맞춰 `period`로 바꿨습니다.
+  - `model_version_changed`는 하단 안내("입력 항목이나 모델 변경 시 직접 비교에 유의")를 띄울지 판단하는 값입니다.
+  - `reason` 값: INITIAL(첫 문진) / RECHECK(재문진) / HEALTH_LOG(체중·허리둘레 기록 반영) / SLEEP_CHECKIN(수면 평균 반영). `reason_label`은 화면 문구입니다(예: "체중 기록 반영", "수면 기록 반영"). C03의 "최근 결과" 표시는 사유가 아니라 목록 첫 항목에 화면이 붙이는 표시입니다.
+  - ⚠️ `reason`은 ERD에 없습니다. → 대조 결과 3
+  - 카드의 `›`를 눌러 그 회차 상세로 들어간다면 상세 API가 더 필요합니다. → 추가 검토
 
-### 11. “만약에” 시뮬레이션 (저장하지 않음)
+### 11. “만약에” 시뮬레이션 (저장하지 않음) · 추가
 - Method / Endpoint: `POST /api/v1/predictions/simulate`
+- Description: 최근 예측의 입력에서 바꿀 수 있는 생활습관 값만 바꿔 다시 계산해 비교한다. 저장하지 않는다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
+- Request Header: `Content-Type: application/json` / `Authorization: Bearer {access_token}`
+- Request Parameter: -
 - Request Body:
 
   ```json
   {
-    "base_prediction_id": 7,
-    "changes": {
-      "smoking_status": "never",
-      "exercise_days_per_week": 5
-    }
+    "base_prediction_date": "2026-11-18",
+    "changes": { "activity_days_per_week": 4, "sleep_hours": 7.0 }
   }
   ```
-- Response Body (성공 예시 = Mock Data):
+- Response Body (200):
 
   ```json
   {
-    "original": {
-      "disease": "hypertension",
-      "risk_level": "medium",
-      "risk_score": 0.42
-    },
-    "simulated": {
-      "disease": "hypertension",
-      "risk_level": "low",
-      "risk_score": 0.31
-    },
-    "diff": -0.11
+    "base_prediction_date": "2026-11-18",
+    "changes": [
+      { "code": "activity_days_per_week", "label": "주간 운동 횟수", "unit": "일", "current": 2, "assumed": 4 },
+      { "code": "sleep_hours", "label": "하루 평균 수면", "unit": "시간", "current": 6.5, "assumed": 7.0 }
+    ],
+    "overall": { "current": 62, "simulated": 56, "diff": -6 },
+    "results": [
+      { "disease_type": "DIABETES", "current_level": "WARNING", "simulated_level": "WARNING" },
+      { "disease_type": "DYSLIPIDEMIA", "current_level": "LOW", "simulated_level": "LOW" }
+    ],
+    "is_saved": false,
+    "notice": "결과는 효과를 보장하지 않으며, 인과관계나 치료 효과로 해석할 수 없습니다."
   }
   ```
-- Status Code: 성공: 200 OK / 400 changes 값 오류 / 401 토큰 없음·만료 / 404 기준 예측 없음
-- 관련 테이블 · REQ: REQ-008
-- 우선순위: 추가
-- 비고: DB에 저장하지 않음
+- Status Code: 200 OK / 400 `changes` 값 범위 오류·바꿀 수 없는 항목(나이·성별·가족력) 포함 / 401 토큰 없음·만료 / 404 기준 예측 없음 / 500 예측 모델 오류
+- 관련 테이블 · REQ: risk_predictions(`input_snapshot` 읽기만) · REQ-008
+- 관련 화면: C06
+- 비고:
+  - C06은 "현재 2일 → 가정 4일"처럼 쌍으로 보여 주므로 응답 `changes[]`에 현재값·가정값을 함께 줍니다. 현재값은 `input_snapshot`에서 꺼냅니다.
+  - 화면에 그려진 조절 항목은 운동 횟수·수면 2개입니다. REQ-008은 허리둘레·흡연·음주도 포함하므로 `changes`는 같은 방식으로 `waist_size`, `smoking_status`, `drinking_days_per_week`를 받을 수 있게 둡니다(화면 추가 여부는 프론트와 결정).
+  - 관리 중(`is_managed`)인 질환은 `results`에서 빠집니다.
 
-### 17. 건강 수치 기록
+### 17. 건강 수치 기록 · MVP
 - Method / Endpoint: `POST /api/v1/health-logs`
+- Description: 그날의 건강 수치를 기록한다. 화면의 탭(혈압·혈당·체중)에서 입력한 항목만 보내고, 같은 날짜에 다시 보내면 보낸 항목만 덮어쓴다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): -
-- Request Body:
+- Request Header: `Content-Type: application/json` / `Authorization: Bearer {access_token}`
+- Request Parameter: -
+- Request Body (혈압 탭 예시):
 
   ```json
   {
-    "log_type": "blood_pressure",
-    "systolic_bp": 128,
-    "diastolic_bp": 82,
-    "measured_at": "2026-11-18T08:00:00+09:00"
+    "log_date": "2026-11-18",
+    "measured_time": "08:30",
+    "pressure_systolic": 128,
+    "pressure_diastolic": 82,
+    "measure_context": "MORNING_REST",
+    "memo": "아침 식사 전 측정"
   }
   ```
-- Response Body (성공 예시 = Mock Data):
+  체중 탭은 `{ "log_date": "2026-11-18", "weight": 61.0 }`, 허리둘레는 `"waist_size": 82.5`를 같은 방식으로 보낸다.
+- Response Body (201 새 기록 / 200 같은 날 덮어쓰기):
 
   ```json
   {
     "health_log_id": 31,
-    "log_type": "blood_pressure",
-    "created_at": "2026-11-18T08:01:00+09:00"
+    "log_date": "2026-11-18",
+    "weight": null,
+    "waist_size": null,
+    "pressure_systolic": 128,
+    "pressure_diastolic": 82,
+    "measured_time": "08:30",
+    "measure_context": "MORNING_REST",
+    "memo": "아침 식사 전 측정",
+    "recalculated": false,
+    "created_at": "2026-11-18T08:31:00+09:00"
   }
   ```
-- Status Code: 성공: 201 Created / 400 log_type·수치 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: health_logs · REQ-018·029
-- 우선순위: MVP
-- 비고: log_type: blood_pressure / blood_glucose / weight 등 (확정 필요)
+- Status Code: 201 Created / 200 OK(같은 날 덮어쓰기) / 400 수치 범위·형식 오류, 수치가 하나도 없음, 혈압은 수축기·이완기 둘 다 필요 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: health_logs · REQ-029·007·018
+- 관련 화면: C05
+- 비고:
+  - 초안의 `log_type` 방식 대신 ERD `health_logs` 구조(하루 1행, 항목별 컬럼, "하루 여러 번이면 마지막 값 사용")를 그대로 따랐습니다. 화면의 탭은 어떤 항목을 보낼지만 결정합니다.
+  - `recalculated`: 체중·허리둘레 최신값이 예측 입력에 반영돼 위험 신호가 다시 계산됐으면 true입니다(공통 규칙 "예측 입력", REQ-007, 하루 최대 1회). 혈압만 기록한 경우는 예측 입력이 아니라 false입니다.
+  - ⚠️ C05에 있는 **혈당 탭**, 측정 시각(`measured_time`), 측정 상황(`measure_context`), 메모(`memo`)는 ERD에 없습니다. 반대로 ERD·REQ-029에 있는 **허리둘레는 C05에 없습니다.** → 대조 결과 4·5
+  - 혈당·체중 탭 안쪽 항목은 Figma에 혈압 탭만 그려져 있어 확인하지 못했습니다.
 
-### 18. 건강 수치 기록·추이 조회
-- Method / Endpoint: `GET /api/v1/health-logs`
+### 17-1. 건강 수치 기록 수정 · MVP (추가 제안)
+- Method / Endpoint: `PATCH /api/v1/health-logs/{health_log_id}`
+- Description: 저장한 기록의 일부 항목을 고친다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): log_type, from_date, to_date, page, size
-- Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- Request Header: `Content-Type: application/json` / `Authorization: Bearer {access_token}`
+- Request Parameter: Path `health_log_id`
+- Request Body:
+
+  ```json
+  { "pressure_systolic": 126, "pressure_diastolic": 80 }
+  ```
+- Response Body (200): No 17 응답과 동일
+- Status Code: 200 OK / 400 수치 범위·형식 오류 / 401 토큰 없음·만료 / 403 내 기록이 아님 / 404 기록 없음
+- 관련 테이블 · REQ: health_logs · REQ-029
+- 관련 화면: C04 → C05
+- 비고: C05 안내문 "저장 후 기록 추이에서 수정·삭제할 수 있어요" 때문에 필요합니다.
+
+### 17-2. 건강 수치 기록 삭제 · MVP (추가 제안)
+- Method / Endpoint: `DELETE /api/v1/health-logs/{health_log_id}`
+- Description: 기록 1건(하루치)을 지운다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Path `health_log_id`
+- Response Body (204): -
+- Status Code: 204 No Content / 401 토큰 없음·만료 / 403 내 기록이 아님 / 404 기록 없음
+- 관련 테이블 · REQ: health_logs · REQ-029
+- 관련 화면: C04
+- 비고: 이미 계산된 예측 이력은 지우지 않습니다(이력은 `input_snapshot`으로 남음).
+
+### 18. 건강 수치 기록 목록 조회 · MVP
+- Method / Endpoint: `GET /api/v1/health-logs`
+- Description: 기록 원본을 날짜 최신순으로 준다 (수정·삭제할 기록 고르기용). 차트용 집계는 No 19가 맡는다.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `period`(1m | 3m | all, 기본 1m), `page`(기본 1), `size`(기본 10)
+- Response Body (200):
 
   ```json
   {
     "items": [
-      {
-        "health_log_id": 31,
-        "log_type": "blood_pressure",
-        "systolic_bp": 128,
-        "diastolic_bp": 82,
-        "measured_at": "2026-11-18T08:00:00+09:00"
-      }
+      { "health_log_id": 31, "log_date": "2026-11-18", "weight": 61.0, "waist_size": null, "pressure_systolic": 128, "pressure_diastolic": 82, "measured_time": "08:30", "measure_context": "MORNING_REST", "memo": "아침 식사 전 측정" },
+      { "health_log_id": 27, "log_date": "2026-11-11", "weight": 61.4, "waist_size": 82.5, "pressure_systolic": 130, "pressure_diastolic": 84, "measured_time": "08:20", "measure_context": "MORNING_REST", "memo": null }
     ],
-    "total": 1
+    "total": 2,
+    "page": 1,
+    "size": 10
   }
   ```
-- Status Code: 성공: 200 OK / 400 날짜 형식 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: health_logs · REQ-018·029
-- 우선순위: MVP
+- Status Code: 200 OK / 400 `period` 값 오류 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: health_logs · REQ-029·018
+- 관련 화면: C04, C05
+- 비고: 초안의 `log_type`·`from_date`·`to_date` 대신 C04와 같은 `period` 하나로 맞췄습니다. 공통 페이지 응답(`items`·`total`·`page`·`size`)을 따릅니다.
 
-### 19. 기록 추이·위험도 변화 요약
+### 19. 기록 추이·위험도 변화 요약 · MVP
 - Method / Endpoint: `GET /api/v1/dashboard`
+- Description: 선택한 기간의 위험 점수 추이와 건강 수치 추이를 차트에 바로 쓸 수 있게 집계해 준다.
 - 인증: 필요
-- Request Header: Content-Type: application/json / Authorization: Bearer {access_token}
-- Request Parameter (Path / Query): period(7d | 30d | 90d, 기본 30d)
-- Request Body: -
-- Response Body (성공 예시 = Mock Data):
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: Query `period`(1m | 3m | all, 기본 1m)
+- Response Body (200):
 
   ```json
   {
-    "period": "30d",
-    "challenge_completion_rate": 0.72,
+    "period": "1m",
+    "risk_score_trend": {
+      "score_max": 100,
+      "points": [
+        { "date": "2026-10-28", "score": 72 },
+        { "date": "2026-11-04", "score": 68 },
+        { "date": "2026-11-11", "score": 65 },
+        { "date": "2026-11-18", "score": 62 }
+      ]
+    },
     "health_trends": [
       {
-        "log_type": "blood_pressure",
+        "metric": "pressure_systolic",
+        "label": "수축기 혈압",
+        "unit": "mmHg",
         "points": [
-          {
-            "date": "2026-11-10",
-            "systolic_bp": 130
-          }
+          { "date": "2026-10-28", "value": 134 },
+          { "date": "2026-11-04", "value": 132 },
+          { "date": "2026-11-11", "value": 130 },
+          { "date": "2026-11-18", "value": 128 }
         ]
       }
     ],
-    "risk_change": {
-      "disease": "hypertension",
-      "from": "medium",
-      "to": "low"
-    }
+    "notice": "서로 다른 지표는 분리해 표시합니다. 변화가 치료 효과를 뜻하지 않습니다."
   }
   ```
-- Status Code: 성공: 200 OK / 400 period 값 오류 / 401 토큰 없음·만료
-- 관련 테이블 · REQ: REQ-018·019
-- 우선순위: MVP
-- 비고: 프론트 차트에 필요한 값만 집계해서 반환
+- Status Code: 200 OK / 400 `period` 값 오류 / 401 토큰 없음·만료
+- 관련 테이블 · REQ: risk_predictions, health_logs · REQ-018·019
+- 관련 화면: C04
+- 비고:
+  - 초안의 `period`(7d | 30d | 90d)를 C04 선택지(최근 1개월 · 3개월 · 전체)에 맞췄습니다.
+  - C04에 그려진 차트는 위험 점수 추이·수축기 혈압 추이 2개입니다. `health_trends`를 배열로 두어 체중(`weight`)·허리둘레(`waist_size`) 카드가 추가돼도 응답 구조가 안 바뀌게 했습니다.
+  - 초안의 `challenge_completion_rate`는 C04에 없어 뺐습니다(실천율은 C02 → No 19-1). `risk_change`는 `risk_score_trend`로 대체했습니다.
+  - REQ-018의 미션 달성률·수면 추이, REQ-019의 **질환별** 위험도 그래프는 C04에 없습니다. → 대조 결과 1·6
+  - 마지막 점이 최신값입니다(화면에서 진하게 표시).
+
+### 19-1. 관리 평가 요약 (기진단) · MVP (추가 제안)
+- Method / Endpoint: `GET /api/v1/management/summary`
+- Description: 진단받은 질환이 **하나라도 있는** 사용자에게 그 질환들의 이번 주 생활 관리 현황을 보여 준다. 예측 점수는 주지 않는다. 진입: 세 질환 모두 관리 중이면 예측 직후 C02로 바로, 일부만 관리 중이면 C01의 "관리 중인 질환" 카드에서 C02로.
+- 인증: 필요
+- Request Header: `Authorization: Bearer {access_token}`
+- Request Parameter: -
+- Response Body (200):
+
+  ```json
+  {
+    "week_start": "2026-11-16",
+    "week_end": "2026-11-22",
+    "completion": { "rate": 0.71, "planned_count": 7, "completed_count": 5 },
+    "managed_items": [
+      {
+        "disease_type": "HYPERTENSION",
+        "label": "고혈압",
+        "latest_log": { "log_date": "2026-11-18", "pressure_systolic": 128, "pressure_diastolic": 82 },
+        "medication_check": { "checked_days": 6, "total_days": 7 }
+      }
+    ],
+    "suggestions": [
+      "같은 시간에 혈압을 기록해 보세요.",
+      "처방약 변경·중단은 반드시 의료진과 상의하세요."
+    ],
+    "disclaimer": "이 평가는 생활 관리 요약이며 질환의 호전이나 치료 효과를 판정하지 않습니다."
+  }
+  ```
+- Status Code: 200 OK / 401 토큰 없음·만료 / 404 관리 중인 질환 없음
+- 관련 테이블 · REQ: risk_predictions(`is_managed`), daily_challenges, health_logs, checkins · REQ-035
+- 관련 화면: C02
+- 비고:
+  - C02 = 이번 주 실천율(71% · 계획 7회 중 5회) · 관리 중인 항목(질환, 최근 기록, 복약 체크 6/7일) · 이번 주 제안. 매일 바뀌는 집계라 예측 저장(No 9)과 분리했습니다.
+  - `completion`은 `daily_challenges`(배정·완료)에서 계산합니다. 실천율은 초안과 같이 0~1 비율로 줍니다.
+  - `suggestions`는 규칙 기반 고정 문구로 시작합니다(LLM 아님). 약 조절을 권하는 문구는 넣지 않습니다.
+  - ⚠️ 복약 체크는 ERD `checkins`에 컬럼이 없습니다(No 15 요청에는 `medication_taken`이 있음). → 대조 결과 7 · 04 참고
+
+#### ➕ 추가 검토 (화면에는 있는데 03 구역에 아직 없는 것)
+- [ ] 예측 회차 상세 조회 (예: `GET /api/v1/predictions/{prediction_date}`) — C03 카드의 `›`가 상세로 들어가는 동작이면 필요. 응답은 No 9와 동일하게.
+- [ ] C07 참여 유형 선택(혼자 꾸준히 / 가까운 사람과 함께 / 코치의 안내와 함께, "나중에 선택하기" 있음) 저장 → 사용자 설정이라 **01 참고** (No 4 `PATCH /users/me`에 필드 추가 요청). REQ-020의 자동 분류(운동형·식이형 등)와는 다른 값입니다.
+- [ ] C01 "나에게 맞는 챌린지 보기" → **04 참고** (D02 추천).
+
+#### 03 구역 ERD 대조 결과 · 팀 확인 요청
+| # | 내용 | 확인할 사람 |
+|---|---|---|
+| 1 | Figma C01·C03·C04·C06은 **종합 점수 1개(대사 건강 위험 점수 0~100)** 만 보여 주는데, 요구사항(REQ-006·019)과 ERD는 **질환별 3개**(`risk_score` 0~1, `risk_level`)입니다. 지금 명세는 둘 다 응답에 넣었습니다. 종합 점수 규칙은 No 9에 **제안**으로 적었습니다(관리 중 질환 제외, 가장 높은 단계 질환 기준, 높을수록 위험). 결정 필요: ① 이 규칙 채택 여부 ② 질환별 결과를 화면에 보여 줄지 | 팀 전체 · 예측 모델(김도엽) · 프론트 |
+| 2 | 종합 점수·등급을 저장하려면 ERD에 자리가 필요합니다(`risk_predictions`는 질환당 1행). 저장하지 않고 조회 때마다 계산하는 방법도 있지만, 경계값이 바뀌면 과거 점수가 달라집니다. 등급 이름("관리 권장")과 `risk_level` 3단계(낮음·주의·높음)의 관계도 정리 필요 | 백엔드 · 예측 모델 |
+| 3 | C03의 "다시 계산된 이유"(첫 문진 / 재문진 / 기록 반영)를 보여 주려면 `risk_predictions`에 `reason` 컬럼이 필요 | 백엔드 |
+| 4 | C05에 혈당 탭·측정 시각·측정 상황·메모가 있는데 ERD `health_logs`에는 없음 → 컬럼 추가(`blood_glucose`, `measured_time`, `measure_context`, `memo`) 또는 화면에서 제외. 혈당은 REQ-029(체중·허리둘레·혈압)에도 없고 예측 입력도 아님 | 프론트 · 백엔드 · 기획 |
+| 5 | 허리둘레는 재계산 입력(REQ-007)인데 C05에 입력 칸이 없음 → C05에 추가하거나 재문진에서만 받기 | 프론트 · 기획 |
+| 6 | REQ-018의 체중·허리둘레·미션 달성률·수면 추이, REQ-020 참여 유형 분류가 C04에 없음 → 화면에 추가할지, 요구사항에서 뺄지 | 프론트 · 기획 |
+| 7 | 복약 체크(C02 "이번 주 6/7일")를 저장할 컬럼이 `checkins`에 없음 | 04 담당 · 백엔드 |
+| 8 | C01 "입력 정보 8개 반영"의 세는 기준(문진 항목 수 vs 모델 입력 수), `factors`의 `code`·문구는 문진(02) 필드와 모델 확정 후 맞춤. 지금 값은 화면 예시 기준 | 02 담당 · 예측 모델 |
+| 9 | 같은 날 예측을 다시 요청했을 때(하루 최대 1회) 409로 막을지, 기존 결과를 200으로 돌려줄지 | 백엔드 |
+| 10 | 일부 질환만 관리 중인 사용자를 위해 C01에 "관리 중인 질환" 카드(→ C02)가 필요합니다. 영향 요인 예시 "최근 혈압 기록"은 예측 입력이 아니라서 문구 교체가 필요합니다 | 프론트 |
+| 11 | ✅ 합의(11/19, 홍시윤): 수면은 "14일 중 7일 이상이면 평균·미만이면 문진 값, 주 1회 재계산, 직전 입력값과 0.5시간 이상 차이 날 때만 새 이력". 04 구역은 체크인 저장, 재계산은 03 공통 규칙에 따라 서버 처리 | 04 담당(홍시윤) · 예측 모델(김도엽) · 백엔드 |
 
 <!-- 03 END -->
 
