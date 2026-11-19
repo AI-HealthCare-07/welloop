@@ -6,6 +6,7 @@ from app.core.db import get_db
 from app.core.security import current_user
 from app.dtos.schemas import QuestionnaireRequest
 from app.models.tables import Questionnaire, User
+from app.models.tables import iso
 
 router = APIRouter(prefix="/api/v1", tags=["02 문진"])
 
@@ -16,4 +17,4 @@ def save_questionnaire(body: QuestionnaireRequest, user: User = Depends(current_
     db.add(q)
     db.commit()
     bmi = round(q.weight / (q.height / 100) ** 2, 1) if q.height and q.weight else None
-    return {"questionnaire_id": q.id, "bmi": bmi, "is_completed": q.is_completed, "created_at": q.created_at.isoformat()}
+    return {"questionnaire_id": q.id, "bmi": bmi, "is_completed": q.is_completed, "created_at": iso(q.created_at)}

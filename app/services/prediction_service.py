@@ -6,13 +6,15 @@
 """
 import datetime as dt
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ai_worker.tasks.risk import RiskInputError, predict_risk
 from app.core.config import DEFAULT_THRESHOLDS, DISCLAIMER, GRADE_LABELS
 from app.core.security import api_error
 from app.models.tables import Checkin, Consent, HealthLog, Questionnaire, RiskPrediction, RiskThreshold, User, now
+from app.models.tables import iso
 
 DISEASE_COLUMNS = {"HYPERTENSION": "htn", "DIABETES": "dm", "DYSLIPIDEMIA": "dl"}
 LEVEL_ORDER = {"LOW": 0, "WARNING": 1, "HIGH": 2}
@@ -161,8 +163,15 @@ def run_prediction(db: Session, user: User, questionnaire_id: int, reason: str |
         raise api_error(400, "VALIDATION_ERROR", "문진이 완료되지 않았어요")
 
     today = now().date()
-    if _rows(db, user.user_id, today):  # 하루 최대 1회: 같은 날은 기존 결과를 그대로 돌려줌 (03 대조 결과 9 임시 결정)
-        return build_response(db, user.user_id, today), False
+    existing = _rows(db, user.user_id, today)
+    if existing:
+        # 하루에 이력은 1회차만 남겨요 (03 대조 결과 9 임시 결정).
+        # 같은 문진이면 기존 결과를 그대로, 그날 문진을 새로 냈으면 오늘 회차를 새 결과로 바꿉니다.
+        if existing[0].questionnaire_id == q.id or q.id < existing[0].questionnaire_id:
+            return build_response(db, user.user_id, today), False
+        db.execute(delete(RiskPrediction).where(RiskPrediction.user_id == user.user_id, RiskPrediction.prediction_date == today))
+        if reason is None and existing[0].reason == "INITIAL":
+            reason = "INITIAL"  # 첫 문진을 같은 날 고쳐 낸 경우
 
     snapshot, sources = build_input(db, user, q, today)
     managed = {d: bool(getattr(q, f"{c}_diagnosed") or getattr(q, f"{c}_medication")) for d, c in DISEASE_COLUMNS.items()}
@@ -192,7 +201,11 @@ def run_prediction(db: Session, user: User, questionnaire_id: int, reason: str |
             major_factor1=factors[0], major_factor2=factors[1], major_factor3=factors[2],
             input_snapshot={"input": snapshot, **meta}, reason=reason,
             overall_score=overall_score, overall_grade=overall_grade))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # 같은 순간에 다른 요청이 먼저 저장함 → 그 결과를 사용
+        db.rollback()
+        return build_response(db, user.user_id, today), False
     return build_response(db, user.user_id, today), True
 
 
@@ -238,7 +251,7 @@ def build_response(db: Session, user_id: int, date: dt.date) -> dict:
         "model_version": first.model_version,
         "is_demo_model": is_demo,  # 합성 데이터 모델이면 true → 화면에 데모 표시 (명세서에 없는 필드, 데모 기간용)
         "disclaimer": DISCLAIMER + (" (데모용 모델: 점수에 의미가 없어요)" if is_demo else ""),
-        "created_at": first.created_at.isoformat(),
+        "created_at": iso(first.created_at),
     }
 
 

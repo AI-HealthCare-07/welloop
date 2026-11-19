@@ -11,7 +11,13 @@ const DISEASE = { HYPERTENSION: "고혈압", DIABETES: "당뇨", DYSLIPIDEMIA: "
 const LEVEL = { LOW: "낮음", WARNING: "주의", HIGH: "높음" };
 const md = (iso) => iso.slice(5).replace("-", "/");
 
+const inFlight = new Set();
 async function api(path, method = "GET", body) {
+  const key = method + " " + path;
+  if (method !== "GET") { if (inFlight.has(key)) throw new Error("처리 중이에요. 잠시만 기다려 주세요."); inFlight.add(key); }
+  try { return await send(path, method, body); } finally { inFlight.delete(key); }
+}
+async function send(path, method, body) {
   const res = await fetch(API + path, { method, headers: { "Content-Type": "application/json", ...(store.t ? { Authorization: "Bearer " + store.t } : {}) },
                                         body: body ? JSON.stringify(body) : undefined });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
@@ -73,7 +79,7 @@ const routes = {
       <label class="check"><input id="agree" type="checkbox">건강정보(민감정보) 수집·이용에 동의합니다</label>
       <p id="err" class="error"></p><button class="btn" id="go">동의하고 문진 시작</button>`;
     $("#go").onclick = async () => { if (!chk("agree")) return showErr(new Error("동의가 있어야 건강 평가를 할 수 있어요"));
-      try { await api("/consents", "POST", { consent_type: "HEALTH_DATA", agreed: true }); Q.step = 1; go("#/q"); } catch (e) { showErr(e); } }; },
+      try { await api("/consents", "POST", { consent_type: "HEALTH_DATA", agreed: true }); Q.step = 1; Q.data = {}; Q.recheck = false; go("#/q"); } catch (e) { showErr(e); } }; },
 
   q: renderQuestionnaire,
 
@@ -200,7 +206,7 @@ const routes = {
       <button class="btn ghost" id="re">재문진하기</button><button class="btn text" id="out">로그아웃</button>`;
     $("#big").onchange = (e) => document.body.classList.toggle("big", e.target.checked);
     $("#re").onclick = () => { Q.step = 1; Q.recheck = true; go("#/q"); };
-    $("#out").onclick = () => { store.t = null; me = null; go("#/"); }; },
+    $("#out").onclick = () => { store.t = null; me = null; Q.data = {}; Q.step = 1; Q.recheck = false; go("#/"); }; },
 };
 
 function checkupCard(c) { return `<div class="card"><h2>검진 수치 확인</h2>${c.exceeded.length ? c.exceeded.map((e) => `<div class="list-row"><span>${esc(e.label)}</span><span class="chip WARNING">${e.value} · 기준 ${esc(e.reference)}</span></div>`).join("") + `<p>${esc(c.guide)}</p>` : `<p>기준을 넘는 수치가 없어요.</p>`}
