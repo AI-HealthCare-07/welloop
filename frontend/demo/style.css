@@ -24,9 +24,12 @@ input[type=text],input[type=email],input[type=password],input[type=number],input
 .chip.WARNING { background:#fdf0e6; color:var(--warn); } .chip.HIGH { background:#fbe9e7; color:var(--high); } .chip.muted { background:#eef1f0; color:var(--sub); }
 .notice { background:#fff8e1; border:1px solid #f0dfa8; border-radius:10px; padding:10px 12px; font-size:.85em; margin:0 0 14px; }
 .error { color:var(--high); font-size:.9em; min-height:1.4em; }
-.bars { display:flex; align-items:flex-end; gap:8px; height:130px; margin-top:10px; }
-.bars div { flex:1; text-align:center; font-size:.75em; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
-.bars i { display:block; background:#b9c5c0; border-radius:6px 6px 0 0; min-height:4px; }
+.bars { display:flex; align-items:flex-end; justify-content:flex-start; gap:6px; height:140px; margin-top:10px; border-bottom:1.5px solid var(--line); }
+.bars div { flex:0 0 calc((100% - 30px) / 6); text-align:center; font-size:.75em; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; position:relative; padding-bottom:0; }
+.bars i { display:block; width:26px; max-width:70%; background:#b9c5c0; border-radius:6px 6px 0 0; min-height:4px; }
+.bars span { position:absolute; bottom:-22px; left:0; right:0; }
+.bars + .sub, .card .bars { margin-bottom:26px; }
+#logo { color:inherit; text-decoration:none; padding:6px 4px; margin:-6px -4px; }
 .bars div:last-child i { background:var(--green); }
 .bars span { color:var(--sub); margin-top:4px; }
 .mission { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); }
