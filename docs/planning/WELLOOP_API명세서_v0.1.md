@@ -1526,16 +1526,110 @@
     },
     "active_users": 120,
     "checkin_rate": 0.64,
-    "coach_calls": 340,
-    "avg_ttft_ms": 820,
-    "token_cost_usd": 12.4,
-    "tool_calls": 510
+    "coach_calls": 340
   }
   ```
 - Status Code: 성공: 200 OK / 400 날짜 형식 오류 / 401 토큰 없음·만료 / 403 관리자 권한 없음
 - 관련 테이블 · REQ: admin_logs · REQ-033, NFR-016
 - 우선순위: MVP
-- 비고: avg_ttft_ms·token_cost_usd·tool_calls는 v1.4 후보 REQ-033 (Langfuse 연동) 결정 후 확정
+- 비고: LLM 토큰·비용·지연은 39번 admin/llm-usage, 가입자 증감은 40번 admin/users/stats에서 조회
+
+### 39. LLM 사용량 확인 (토큰·비용·지연·도구 호출, 기능별·모델별·기간별)
+- Method / Endpoint: `GET /api/v1/admin/llm-usage`
+- 인증: 관리자
+- Request Header: Content-Type: application/json / Authorization: Bearer {admin_access_token}
+- Request Parameter (Path / Query): from_date, to_date, group_by(day | week | model | feature, 기본 day), feature(선택: coach_today | coach_chat | prediction_explain | message_suggest)
+- Request Body: -
+- Response Body (성공 예시 = Mock Data):
+
+  ```json
+  {
+    "period": {
+      "from": "2026-11-01",
+      "to": "2026-11-18"
+    },
+    "group_by": "feature",
+    "totals": {
+      "requests": 340,
+      "input_tokens": 412000,
+      "output_tokens": 98000,
+      "total_tokens": 510000,
+      "cost_usd": 12.4,
+      "avg_ttft_ms": 820,
+      "avg_latency_ms": 3100,
+      "tool_calls": 510,
+      "error_rate": 0.018
+    },
+    "items": [
+      {
+        "key": "coach_chat",
+        "requests": 210,
+        "total_tokens": 360000,
+        "cost_usd": 8.9,
+        "avg_ttft_ms": 900,
+        "tool_calls": 420
+      },
+      {
+        "key": "coach_today",
+        "requests": 95,
+        "total_tokens": 110000,
+        "cost_usd": 2.6,
+        "avg_ttft_ms": 700,
+        "tool_calls": 60
+      }
+    ]
+  }
+  ```
+- Status Code: 성공: 200 OK / 400 날짜 형식·group_by·feature 값 오류 / 401 토큰 없음·만료 / 403 관리자 권한 없음 / 500 사용량 수집(Langfuse) 조회 실패
+- 관련 테이블 · REQ: admin_logs · REQ-033, NFR-006·010
+- 우선순위: MVP
+- 비고: 사용자 대화 원문·개인정보 없이 집계값만 반환. Langfuse 연동 방식(직접 조회 vs 자체 로그 테이블 저장)은 백엔드 확정 필요. 도구 호출·모델 호출 상한(NFR-010)은 v1.4 후보
+
+### 40. 사용자 증감 현황 (신규 가입·탈퇴·순증감·활성 사용자)
+- Method / Endpoint: `GET /api/v1/admin/users/stats`
+- 인증: 관리자
+- Request Header: Content-Type: application/json / Authorization: Bearer {admin_access_token}
+- Request Parameter (Path / Query): from_date, to_date, interval(day | week | month, 기본 day)
+- Request Body: -
+- Response Body (성공 예시 = Mock Data):
+
+  ```json
+  {
+    "period": {
+      "from": "2026-11-01",
+      "to": "2026-11-18"
+    },
+    "interval": "day",
+    "summary": {
+      "total_users": 520,
+      "new_users": 48,
+      "withdrawn_users": 6,
+      "net_change": 42,
+      "change_rate": 0.088,
+      "active_users": 120
+    },
+    "series": [
+      {
+        "date": "2026-11-17",
+        "new_users": 3,
+        "withdrawn_users": 0,
+        "net_change": 3,
+        "total_users": 518
+      },
+      {
+        "date": "2026-11-18",
+        "new_users": 2,
+        "withdrawn_users": 0,
+        "net_change": 2,
+        "total_users": 520
+      }
+    ]
+  }
+  ```
+- Status Code: 성공: 200 OK / 400 날짜 형식·interval 값 오류 / 401 토큰 없음·만료 / 403 관리자 권한 없음
+- 관련 테이블 · REQ: users · admin_logs · REQ-033, NFR-016
+- 우선순위: MVP
+- 비고: 개인 식별 정보 없이 집계 수치만 반환. 탈퇴 수치는 탈퇴 시 기록 삭제 정책(ERD 확인 질문)과 맞춰 집계 방식 결정 필요(예: 탈퇴 시점 카운터 별도 저장)
 
 <!-- 06 END -->
 
