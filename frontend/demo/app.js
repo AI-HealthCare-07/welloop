@@ -29,6 +29,8 @@ function bars(points, key) {
   const last = points.slice(-6), max = Math.max(...last.map((p) => p[key])) || 1;
   return `<div class="bars">${last.map((p) => `<div><b>${p[key]}</b><i style="height:${Math.max(6, (p[key] / max) * 80)}%"></i><span>${md(p.date)}</span></div>`).join("")}</div>`;
 }
+const alertCard = (a) => `<div class="card alert ${a.level}"><h2>${esc(a.title)}</h2><p>${esc(a.message)}</p></div>`;
+const alertsHtml = async () => (await api("/safety/alerts").catch(() => ({ items: [] }))).items.map(alertCard).join("");
 const demoNote = (r) => r.is_demo_model ? `<div class="notice">데모용 모델이에요. 합성 데이터로 만든 것이라 <b>점수에 의미가 없습니다.</b> 화면 흐름 확인용입니다.</div>` : "";
 
 const routes = {
@@ -73,7 +75,8 @@ const routes = {
 
   result: async () => { const r = await api("/predictions/latest");
     if (r.view === "MANAGEMENT") return go("#/manage");
-    view.innerHTML = `<p class="sub">예측 결과 · ${esc(r.prediction_date)}</p><h1>작은 습관부터<br>관리를 시작해 보세요</h1>${demoNote(r)}
+    const al = await alertsHtml();
+    view.innerHTML = `<p class="sub">예측 결과 · ${esc(r.prediction_date)}</p><h1>작은 습관부터<br>관리를 시작해 보세요</h1>${demoNote(r)}${al}
       <div class="card"><h2>대사 건강 위험 신호 점수</h2><div class="big-num">${r.overall.score} <span class="sub">/ 100</span></div>
         <p><span class="chip ${r.overall.grade}">${esc(r.overall.grade_label)}</span> <span class="sub">점수가 높을수록 위험 신호가 커요 · 입력 정보 ${r.input_count}개 반영</span></p></div>
       <div class="card"><h2>질환별 위험 신호</h2>${r.results.map((x) => `<div class="list-row"><span>${DISEASE[x.disease_type]}</span>
@@ -84,7 +87,24 @@ const routes = {
       <p class="sub">${esc(r.disclaimer)}</p>
       <button class="btn" onclick="go('#/home')">나에게 맞는 챌린지 보기</button>
       <button class="btn ghost" onclick="go('#/whatif')">만약 생활습관을 바꾼다면?</button>
+      <button class="btn text" onclick="go('#/checkup')">검진 수치 입력하기 (선택)</button>
       <button class="btn text" onclick="go('#/history')">예측 이력 보기</button>`; },
+
+  checkup: async () => { const last = await api("/checkups/latest").catch(() => null);
+    const f = (id, label) => `<div><label>${label}</label><input id="${id}" type="number" step="0.1"></div>`;
+    view.innerHTML = `<p class="sub">선택 입력</p><h1>검진 수치가 있다면<br>더 입력해 주세요</h1>
+      <div class="card"><label>검진 받은 날</label><input id="checkup_date" type="date">
+        <div class="row">${f("pressure_systolic", "수축기 혈압")}${f("pressure_diastolic", "이완기 혈압")}</div>
+        <div class="row">${f("fasting_glucose", "공복혈당")}${f("hba1c", "당화혈색소 (%)")}</div>
+        <div class="row">${f("total_cholesterol", "총콜레스테롤")}${f("ldl_cholesterol", "LDL")}</div>
+        <div class="row">${f("hdl_cholesterol", "HDL")}${f("triglycerides", "중성지방")}</div>
+        <p class="sub">있는 수치만 입력하세요. 검진 수치는 기준 초과 안내에만 쓰고 위험 신호 예측에는 넣지 않아요.</p>
+        <p id="err" class="error"></p><button class="btn" id="go">저장하고 확인하기</button></div><div id="out">${last ? checkupCard(last) : ""}</div>
+      <button class="btn text" onclick="go('#/result')">결과로 돌아가기</button>`;
+    $("#go").onclick = async () => { try { const body = { checkup_date: val("checkup_date") };
+      ["pressure_systolic", "pressure_diastolic", "fasting_glucose", "hba1c", "total_cholesterol", "ldl_cholesterol", "hdl_cholesterol", "triglycerides"].forEach((k) => body[k] = num(k));
+      $("#out").innerHTML = checkupCard(await api("/checkups", "POST", body)); $("#err").textContent = "";
+    } catch (e) { showErr(e); } }; },
 
   manage: async () => { let s; try { s = await api("/management/summary"); } catch { return go("#/result"); }
     view.innerHTML = `<p class="sub">관리 평가 · 진단 이력이 있는 사용자</p><h1>치료는 의료진과,<br>생활 관리는 꾸준하게</h1>
@@ -99,7 +119,8 @@ const routes = {
 
   home: async () => { const [coach, today, latest] = await Promise.all([api("/coach/today"), api("/challenges/today"), api("/predictions/latest").catch(() => null)]);
     if (!latest) return go("#/consent");
-    view.innerHTML = `<h1>${esc(me.name)}님, 안녕하세요</h1>
+    const al = await alertsHtml();
+    view.innerHTML = `<h1>${esc(me.name)}님, 안녕하세요</h1>${al}
       <div class="card"><h2>오늘의 코치</h2><p>${esc(coach.content)}</p><p class="sub">${esc(coach.disclaimer)}</p></div>
       <div class="card"><h2>오늘의 미션 <span class="chip">${today.missions.filter((m) => m.completed).length} / ${today.missions.length}</span>
         ${today.streak_days ? `<span class="chip">${today.streak_days}일 연속</span>` : ""}</h2>
@@ -115,11 +136,13 @@ const routes = {
         <div><b>${esc(m.title)}</b><p class="sub">${esc(m.description)}</p></div></label>`).join("")}</div>
       <div class="card"><h2>오늘의 컨디션 · 선택</h2><div class="row"><div><label>어젯밤 수면 (시간)</label><input id="sleep" type="number" step="0.5" min="0" max="24"></div>
         <div><label>기분</label><select id="mood"><option value="">선택</option><option value="1">나쁨</option><option value="2">조금 나쁨</option><option value="3">보통</option><option value="4">좋음</option><option value="5">아주 좋음</option></select></div></div>
-        <label class="check"><input id="med" type="checkbox">오늘 약을 챙겼어요 (복용 중인 경우)</label></div>
+        <label class="check"><input id="med" type="checkbox">오늘 약을 챙겼어요 (복용 중인 경우)</label>
+        <label>오늘의 한 줄 메모 · 선택</label><input id="memo" type="text" maxlength="200" placeholder="나만 보는 메모예요"></div><div id="safety"></div>
       <p id="err" class="error"></p><button class="btn" id="go">체크인 저장</button><p class="sub">못 한 날이 있어도 괜찮아요. 다시 시작하면 됩니다.</p>`;
     $("#go").onclick = async () => { try {
       const r = await api("/checkins", "POST", { completed_daily_challenge_ids: [...document.querySelectorAll(".m:checked")].map((x) => Number(x.value)),
-                                               sleep_hours: num("sleep"), mood: num("mood"), medication_taken: chk("med") ? true : null });
+                                               sleep_hours: num("sleep"), mood: num("mood"), medication_taken: chk("med") ? true : null, memo: val("memo") });
+      $("#safety").innerHTML = r.safety_alert ? alertCard(r.safety_alert) : "";
       $("#err").style.color = "var(--green)"; $("#err").textContent = `저장했어요. 오늘 실천율 ${Math.round(r.completion_rate * 100)}% · ${r.streak_days}일 연속`;
     } catch (e) { showErr(e); } }; },
 
@@ -176,6 +199,8 @@ const routes = {
     $("#out").onclick = () => { store.t = null; me = null; go("#/"); }; },
 };
 
+function checkupCard(c) { return `<div class="card"><h2>검진 수치 확인</h2>${c.exceeded.length ? c.exceeded.map((e) => `<div class="list-row"><span>${esc(e.label)}</span><span class="chip WARNING">${e.value} · 기준 ${esc(e.reference)}</span></div>`).join("") + `<p>${esc(c.guide)}</p>` : `<p>기준을 넘는 수치가 없어요.</p>`}
+  ${c.is_stale ? `<p class="sub">${esc(c.stale_guide)}</p>` : ""}<p class="sub">의학적 진단이 아니며 정확한 판단은 의료진과 상담하세요.</p></div>`; }
 function alertMsg(text) { const n = document.createElement("div"); n.className = "notice"; n.textContent = text; view.prepend(n); }
 
 /* ----- 문진 4단계 (B01~B04) ----- */

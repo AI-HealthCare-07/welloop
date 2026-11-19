@@ -6,14 +6,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.apis import auth, challenges, predictions, questionnaires, records
+from app.apis import admin, auth, challenges, predictions, questionnaires, records, safety
 from app.core.db import Base, engine
 from app.models import tables  # noqa: F401  (테이블 등록)
 
 app = FastAPI(title="WELLOOP API (데모)", version="0.1.0")
 Base.metadata.create_all(engine)  # 데모: 마이그레이션 도구 없이 테이블 생성 (템플릿 병합 후 교체)
 
-for module in (auth, questionnaires, predictions, records, challenges):
+for module in (auth, questionnaires, predictions, records, challenges, safety, admin):
     app.include_router(module.router)
 
 

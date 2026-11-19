@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ai_worker.tasks.risk import RiskInputError, predict_risk
 from app.core.config import DEFAULT_THRESHOLDS, DISCLAIMER, GRADE_LABELS
 from app.core.security import api_error
-from app.models.tables import Checkin, Consent, HealthLog, Questionnaire, RiskPrediction, User, now
+from app.models.tables import Checkin, Consent, HealthLog, Questionnaire, RiskPrediction, RiskThreshold, User, now
 
 DISEASE_COLUMNS = {"HYPERTENSION": "htn", "DIABETES": "dm", "DYSLIPIDEMIA": "dl"}
 LEVEL_ORDER = {"LOW": 0, "WARNING": 1, "HIGH": 2}
@@ -32,10 +32,17 @@ FAMILY_FIELD = {"HYPERTENSION": "family_htn", "DIABETES": "family_dm", "DYSLIPID
 REASON_LABELS = {"INITIAL": "첫 문진 결과", "RECHECK": "재문진", "HEALTH_LOG": "체중 기록 반영", "SLEEP_CHECKIN": "수면 기록 반영"}
 
 
-def risk_level(score: float) -> str:
-    if score >= DEFAULT_THRESHOLDS["high_from"]:
+def get_thresholds(db: Session) -> dict[str, tuple[float, float]]:
+    """질환별 (주의 시작, 높음 시작). 관리자가 risk_thresholds에서 바꿀 수 있고, 없으면 임시 기본값."""
+    default = (DEFAULT_THRESHOLDS["warning_from"], DEFAULT_THRESHOLDS["high_from"])
+    saved = {t.disease_type: (t.warning_from, t.high_from) for t in db.scalars(select(RiskThreshold))}
+    return {d: saved.get(d, default) for d in DISEASE_COLUMNS}
+
+
+def risk_level(score: float, th: tuple[float, float]) -> str:
+    if score >= th[1]:
         return "HIGH"
-    return "WARNING" if score >= DEFAULT_THRESHOLDS["warning_from"] else "LOW"
+    return "WARNING" if score >= th[0] else "LOW"
 
 
 def _age(birth: dt.date, today: dt.date) -> int:
@@ -61,12 +68,13 @@ def build_input(db: Session, user: User, q: Questionnaire, today: dt.date) -> tu
     return snapshot, sources
 
 
-def overall_of(results: list[dict]) -> dict | None:
+def overall_of(results: list[dict], ths: dict) -> dict | None:
     """종합 점수 규칙 (03 No 9 제안): 가장 높은 단계 질환 기준, 같으면 점수가 큰 쪽."""
-    basis = max(results, key=lambda r: (LEVEL_ORDER[risk_level(r["risk_score"])], r["risk_score"]), default=None)
+    level = lambda r: risk_level(r["risk_score"], ths[r["disease_type"]])  # noqa: E731
+    basis = max(results, key=lambda r: (LEVEL_ORDER[level(r)], r["risk_score"]), default=None)
     if basis is None:
         return None
-    return {"score": round(basis["risk_score"] * 100), "grade": risk_level(basis["risk_score"]),
+    return {"score": round(basis["risk_score"] * 100), "grade": level(basis),
             "basis_disease_type": basis["disease_type"]}
 
 
@@ -126,14 +134,15 @@ def simulate(db: Session, user_id: int, changes: dict) -> dict:
         sim = predict_risk({**base, **changes}, targets)["results"]
     except RiskInputError as e:
         raise api_error(400, "VALIDATION_ERROR", f"값을 확인해 주세요: {e.errors}")
-    o_cur, o_sim = overall_of(cur), overall_of(sim)
+    ths = get_thresholds(db)
+    o_cur, o_sim = overall_of(cur, ths), overall_of(sim, ths)
     return {
         "base_prediction_date": date.isoformat(),
         "changes": [{"code": k, "label": SIM_LABELS[k], "unit": UNITS.get(k), "current": base.get(k), "assumed": v}
                     for k, v in changes.items()],
         "overall": {"current": o_cur["score"], "simulated": o_sim["score"], "diff": o_sim["score"] - o_cur["score"]},
-        "results": [{"disease_type": c["disease_type"], "current_level": risk_level(c["risk_score"]),
-                     "simulated_level": risk_level(s["risk_score"])} for c, s in zip(cur, sim)],
+        "results": [{"disease_type": c["disease_type"], "current_level": risk_level(c["risk_score"], ths[c["disease_type"]]),
+                     "simulated_level": risk_level(s["risk_score"], ths[s["disease_type"]])} for c, s in zip(cur, sim)],
         "is_saved": False,
         "notice": "결과는 효과를 보장하지 않으며, 인과관계나 치료 효과로 해석할 수 없습니다.",
     }
@@ -164,7 +173,8 @@ def run_prediction(db: Session, user: User, questionnaire_id: int, reason: str |
         raise api_error(400, "VALIDATION_ERROR", f"예측에 필요한 문진 값이 부족해요: {e.errors}")
     scored = {r["disease_type"]: r for r in out["results"]}
 
-    overall = overall_of(list(scored.values()))
+    ths = get_thresholds(db)
+    overall = overall_of(list(scored.values()), ths)
     basis = scored[overall["basis_disease_type"]] if overall else None
     overall_score = overall["score"] if overall else None
     overall_grade = overall["grade"] if overall else None
@@ -178,7 +188,7 @@ def run_prediction(db: Session, user: User, questionnaire_id: int, reason: str |
         db.add(RiskPrediction(
             user_id=user.user_id, questionnaire_id=q.id, prediction_date=today, disease_type=disease,
             model_version=out["model_version"], is_managed=managed[disease],
-            risk_score=r["risk_score"] if r else None, risk_level=risk_level(r["risk_score"]) if r else None,
+            risk_score=r["risk_score"] if r else None, risk_level=risk_level(r["risk_score"], ths[disease]) if r else None,
             major_factor1=factors[0], major_factor2=factors[1], major_factor3=factors[2],
             input_snapshot={"input": snapshot, **meta}, reason=reason,
             overall_score=overall_score, overall_grade=overall_grade))

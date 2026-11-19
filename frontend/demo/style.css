@@ -39,3 +39,7 @@ input[type=text],input[type=email],input[type=password],input[type=number],input
 #tabs[hidden] { display:none; }
 #tabs a { flex:1; text-align:center; padding:16px 0; min-height:56px; color:var(--sub); text-decoration:none; font-size:.85em; }
 #tabs a.on { color:var(--green); font-weight:700; }
+.card.alert { border-color:#e8c9a8; background:#fff7ef; }
+.card.alert.URGENT { border-color:#e0a09b; background:#fdeeee; }
+table { width:100%; border-collapse:collapse; font-size:.9em; } th,td { text-align:left; padding:8px 6px; border-top:1px solid var(--line); vertical-align:middle; }
+td input[type=number] { min-height:40px; width:90px; padding:0 8px; }
