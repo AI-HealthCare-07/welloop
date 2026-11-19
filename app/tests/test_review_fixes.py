@@ -66,3 +66,24 @@ def test_future_dates_and_concurrent_saves():
     logs_now = client.get("/api/v1/health-logs", headers=h).json()
     assert logs_now["total"] == 1
     assert client.patch(f"/api/v1/health-logs/{logs_now['items'][0]['health_log_id']}", json={}, headers=h).status_code == 400
+
+
+def test_validation_messages_are_korean():
+    """11/19 피드백: 허리둘레를 인치로 넣으면 영어 오류가 뜨던 문제."""
+    h = signup_login("msg@example.com")
+    r = client.post("/api/v1/questionnaires", json={**Q, "waist_size": 32}, headers=h)
+    assert r.status_code == 400 and r.json()["detail"] == "허리둘레는 40 이상이어야 해요"
+    cases = [
+        ({"height": 300}, "키는 220 이하여야 해요"),
+        ({"smoking_status": "NON_SMOKER"}, "흡연은 다음 중 하나여야 해요: NEVER, FORMER, CURRENT"),
+        ({"memo": "가" * 600}, "메모는 500자 이하로 입력해 주세요"),
+    ]
+    for patch, expected in cases[:2]:
+        assert client.post("/api/v1/questionnaires", json={**Q, **patch}, headers=h).json()["detail"] == expected
+    assert client.post("/api/v1/checkins", json=dict([cases[2][0].popitem()]), headers=h).json()["detail"] == cases[2][1]
+    assert client.get("/api/v1/predictions?page=0", headers=h).json()["detail"] == "페이지는 1 이상이어야 해요"
+    assert client.post("/api/v1/auth/signup", json={"email": "no-at-sign", "password": "Welloop!2345", "name": "x",
+                                                    "birth_date": "1974-01-01", "gender": "FEMALE",
+                                                    "terms_agreed": True, "privacy_agreed": True}).json()["detail"] == "이메일은 형식이 올바르지 않아요"
+    assert all(not any(c.isascii() and c.isalpha() for c in client.post("/api/v1/questionnaires", json={**Q, **p}, headers=h).json()["detail"].split(":")[0])
+               for p, _ in cases[:2])  # 필드 이름도 한국어

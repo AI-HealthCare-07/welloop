@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from app.apis import admin, auth, challenges, predictions, questionnaires, records, safety
+from app.core import labels
 from app.core.db import Base, engine
 from app.models import tables  # noqa: F401  (테이블 등록)
 
@@ -32,8 +33,9 @@ async def conflict_error(_: Request, exc: IntegrityError):
 @app.exception_handler(RequestValidationError)
 async def validation_error(_: Request, exc: RequestValidationError):
     first = exc.errors()[0]
-    field = ".".join(str(x) for x in first["loc"] if x != "body")
-    return JSONResponse(status_code=400, content={"detail": f"{field}: {first['msg']}", "code": "VALIDATION_ERROR"})
+    parts = [str(x) for x in first["loc"] if x not in ("body", "query", "path")]
+    field = parts[-1] if parts else ""
+    return JSONResponse(status_code=400, content={"detail": labels.message(field, first["msg"]), "code": "VALIDATION_ERROR"})
 
 
 @app.get("/health")

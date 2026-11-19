@@ -79,7 +79,9 @@ def today_missions(db: Session, user: User, date: dt.date | None = None) -> dict
                  "category_label": CATEGORY_LABELS[c.category], "title": c.title, "description": c.description,
                  "intensity": c.intensity, "completed": d.is_completed} for d, c in rows]
     done = sum(m["completed"] for m in missions)
-    return {"date": date.isoformat(), "missions": missions, "recommended_categories": cats,
+    saved = db.scalar(select(Checkin).where(Checkin.user_id == user.user_id, Checkin.checkin_date == date))
+    checkin = {f: getattr(saved, f) for f in ("sleep_hours", "mood", "refreshed", "stress", "memo", "medication_taken")} if saved else None
+    return {"date": date.isoformat(), "missions": missions, "recommended_categories": cats, "checkin": checkin,
             "completion_rate": round(done / len(missions), 2) if missions else 0.0, "streak_days": streak(db, user.user_id, date)}
 
 
