@@ -1,49 +1,12 @@
-"""WELLOOP 백엔드 (데모). 실행: uvicorn app.main:app --reload  →  화면 http://localhost:8000 · API 문서 /docs"""
-from pathlib import Path
+from fastapi import FastAPI
+from fastapi.responses import ORJSONResponse
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import IntegrityError
+from app.apis.v1 import v1_routers
+from app.core.db.databases import initialize_tortoise
 
-from app.apis import admin, auth, challenges, predictions, questionnaires, records, safety
-from app.core import labels
-from app.core.db import Base, engine
-from app.models import tables  # noqa: F401  (테이블 등록)
+app = FastAPI(
+    default_response_class=ORJSONResponse, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json"
+)
+initialize_tortoise(app)
 
-app = FastAPI(title="WELLOOP API (데모)", version="0.1.0")
-Base.metadata.create_all(engine)  # 데모: 마이그레이션 도구 없이 테이블 생성 (템플릿 병합 후 교체)
-
-for module in (auth, questionnaires, predictions, records, challenges, safety, admin):
-    app.include_router(module.router)
-
-
-@app.exception_handler(HTTPException)
-async def http_error(_: Request, exc: HTTPException):
-    body = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail), "code": "ERROR"}
-    return JSONResponse(status_code=exc.status_code, content=body)
-
-
-@app.exception_handler(IntegrityError)
-async def conflict_error(_: Request, exc: IntegrityError):
-    return JSONResponse(status_code=409, content={"detail": "같은 요청이 동시에 처리됐어요. 다시 시도해 주세요.", "code": "CONFLICT"})
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_error(_: Request, exc: RequestValidationError):
-    first = exc.errors()[0]
-    parts = [str(x) for x in first["loc"] if x not in ("body", "query", "path")]
-    field = parts[-1] if parts else ""
-    return JSONResponse(status_code=400, content={"detail": labels.message(field, first["msg"]), "code": "VALIDATION_ERROR"})
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-# 데모 화면 (빌드 도구 없이 동작). 라우터 등록 뒤에 붙여야 /api 경로를 가리지 않아요.
-_DEMO_UI = Path(__file__).resolve().parents[1] / "frontend" / "demo"
-if _DEMO_UI.exists():
-    app.mount("/", StaticFiles(directory=_DEMO_UI, html=True), name="demo-ui")
+app.include_router(v1_routers)

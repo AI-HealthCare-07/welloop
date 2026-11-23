@@ -1,8 +1,0 @@
-# 백엔드 데모 의존성 (11/23 템플릿 설정과 분리. 템플릿 확인 후 통합)
-fastapi>=0.110
-uvicorn>=0.29
-sqlalchemy>=2.0
-pyjwt>=2.8
-bcrypt>=4.1
-httpx>=0.27
-pytest>=8.0
