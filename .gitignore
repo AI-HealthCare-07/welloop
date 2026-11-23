@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# 가상환경
+.venv
+
+# 비밀·환경 변수 (예시 파일만 커밋)
+.env
+.*.env
+envs/*.env
+envs/.*.env
+!envs/example.local.env
+!envs/example.prod.env
+
+# 데이터 원자료·가공본 (data/.gitignore와 이중 보호, NFR-015)
+data/*
+!data/.gitignore
+!data/README.md
+*.sav
+*.parquet
+
+# IDE
+.idea/
+.vscode/
+
+# 테스트·커버리지
+.coverage
+*.coverage
+.coverage.*
+.pytest_cache/
+.ruff_cache/
