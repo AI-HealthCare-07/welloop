@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -eo pipefail
 
 COLOR_GREEN=$(tput setaf 2)
@@ -8,6 +9,9 @@ COLOR_NC=$(tput sgr0)
 cd "$(dirname "$0")/../.."
 
 source .env
+
+# .env의 DB_HOST(mysql)는 컨테이너 간 통신용이라, 호스트에서 실행하는 pytest는 포트로 노출된 localhost에 접속해요.
+export DB_HOST=localhost
 
 echo "${COLOR_BLUE}Find Tests${COLOR_NC}"
 
