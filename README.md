@@ -57,16 +57,18 @@ uv sync --python 3.13 --all-groups --frozen
 cp envs/example.local.env envs/.local.env
 ```
 
-`envs/.local.env`에서 `DB_HOST=localhost`를 `DB_HOST=mysql`로 바꿔 주세요.
-컨테이너 안에서 `localhost`는 MySQL이 아니라 자기 자신을 가리켜서, 바꾸지 않으면 API가 DB에 연결하지 못해요.
+예시 파일에는 docker compose 기준으로 `DB_HOST=mysql`이 들어 있어서 그대로 쓰면 돼요.
+컨테이너끼리는 서비스 이름(`mysql`)으로 연결해요. `localhost`로 두면 fastapi 컨테이너가 자기 자신을 찾아서 DB에 연결하지 못해요.
 
 **3. 루트 `.env`에 연결하기**
 
 docker compose와 앱 설정은 루트의 `.env`를 읽어요. 실제 파일은 `envs/.local.env` 하나만 두고, 루트에는 링크를 걸어요.
 
 ```bash
-ln -s envs/.local.env .env
+ln -sf envs/.local.env .env
 ```
+
+루트 `.env`를 실제 파일로 쓰고 있었다면, 값을 `envs/.local.env`로 먼저 옮긴 뒤 실행해 주세요. `-f`가 기존 파일을 링크로 덮어써요.
 
 **4. 전체 스택 실행**
 
@@ -86,6 +88,8 @@ uv run ruff check . && uv run ruff format . --check   # CI lint와 같아요
 ./scripts/ci/run_test.sh                               # mysql 컨테이너가 떠 있어야 해요
 ```
 
+테스트는 `uv run pytest`로 직접 돌리지 말고 위 스크립트로 실행해 주세요. 스크립트가 테스트용 `test` DB를 만들 권한을 주고, 호스트에서 접속하도록 `DB_HOST=localhost`를 맞춰 줘요.
+
 ## 브랜치·PR 규칙
 
 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)와 [PR_GUIDE.md](PR_GUIDE.md)에 있어요.
@@ -102,5 +106,6 @@ uv run ruff check . && uv run ruff format . --check   # CI lint와 같아요
 
 - `.env`, `envs/.local.env`, `envs/.prod.env`, API 키, `.pem` 파일은 커밋하지 않아요. 채팅이나 AI에도 붙여넣지 않아요.
 - 국민건강영양조사 등 데이터 원자료는 `data/`에만 두고 커밋하지 않아요. `.gitignore`로 막혀 있어요. 받는 방법은 [data/README.md](data/README.md)에 있어요.
+  - SWAN(ICPSR) 데이터는 각자 ICPSR에 가입해서 직접 내려받아요. 약관상 재배포가 금지돼 있어서 팀원끼리 파일을 공유하거나 AI에 올리면 안 돼요.
 - `envs/example.*.env`의 값은 공개된 예시예요. 운영 환경에서는 반드시 새 값으로 바꿔요.
 - 키가 노출됐다면 **바로 폐기·재발급**하고 팀에 알려 주세요. 자세한 절차는 [CONTRIBUTING.md](CONTRIBUTING.md) 6장에 있어요.
