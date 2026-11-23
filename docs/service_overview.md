@@ -349,6 +349,7 @@ AI 기반 질환 발생 위험 예측을 실질적인 생활습관 개선 행동
 
 - **모델 성능 및 활용 기준**
   - LDL-C 검사 결과 보유 여부에 따른 A/B 모델의 성능 및 활용 가능성 검토.
+  - 기저 LDL-C 단독 예측 모델과 B 모델의 성능을 비교하여 추가 변수 활용에 따른 예측 성능 개선 여부 확인.
   - 기저 LDL-C 구간별 모델 성능 및 예측 결과의 신뢰성 평가.
   - 모델 성능이 서비스 활용 기준을 충족하지 못하는 경우 개별 발생 확률을 제공하지 않고 일반적인 건강관리 및 검진 안내로 대체.
   - 모델별 세부 평가 지표 및 성능 목표는 AI 모델링 단계에서 확정.
@@ -385,8 +386,10 @@ AI 기반 질환 발생 위험 예측을 실질적인 생활습관 개선 행동
 
 ### 14.1. 폐경 이행기 및 지질 대사
 
-- **Are Changes in Cardiovascular Disease Risk Factors in Midlife Women due to Chronological Aging or to the Menopausal Transition?**
+- **Matthews et al. (2009). Are Changes in Cardiovascular Disease Risk Factors in Midlife Women Due to Chronological Aging or to the Menopausal Transition?**
+  - Journal of the American College of Cardiology, 54(25), 2366–2373.
   - [논문 원문](https://pmc.ncbi.nlm.nih.gov/articles/PMC2856606/)
+  - [DOI](https://doi.org/10.1016/j.jacc.2009.10.009)
   - 활용 목적: 폐경 이행기에 따른 LDL-C 변화 분석 및 예측 모델 주제 선정 근거
 
 - **정인숙, 윤혜선, 김묘성, 황윤선 (2022). 폐경 후 이상지질혈증 발생양상과 위험요인.**
