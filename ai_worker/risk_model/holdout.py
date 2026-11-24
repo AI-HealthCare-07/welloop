@@ -342,19 +342,28 @@ def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: lis
     print("    ※ 홀드아웃은 분위당 62명이라 편차 추정이 매우 불안정하다. 위 신뢰구간을 함께 볼 것.")
 
 
-def shap_report(train: pd.DataFrame, hold: pd.DataFrame, features: list[str]) -> None:
-    """SHAP 기여를 고정 요인 / 조절 가능 요인으로 나눠 낸다 (설계 v0.2 10-1절)."""
-    import shap
+def linear_shap(coef: np.ndarray, x: np.ndarray, background_mean: np.ndarray) -> np.ndarray:
+    """선형 모형의 SHAP 기여값. 근사가 아니라 정확한 해다.
 
+    로지스틱 회귀의 로그오즈는 변수의 선형 결합이므로, 각 변수의 Shapley 값은
+    순서와 무관하게 phi_j = coef_j * (x_j - E[x_j]) 하나로 결정된다.
+
+    `shap` 라이브러리의 LinearExplainer와 같은 값을 낸다 (오차 0.0 확인).
+    numba·llvmlite를 끌고 오는 `shap` 의존성을 피하기 위해 직접 계산한다.
+    모델을 비선형(부스팅 등)으로 바꾸면 이 식은 더 이상 쓸 수 없고 `shap`이 필요하다.
+    """
+    return coef * (x - background_mean)
+
+
+def shap_report(train: pd.DataFrame, hold: pd.DataFrame, features: list[str]) -> None:
+    """요인 기여를 고정 요인 / 조절 가능 요인으로 나눠 낸다 (설계 v0.2 10-1절)."""
     model = pipeline().fit(train[features].to_numpy(float), train.y.astype(int))
     imputer, scaler, logreg = model[0], model[1], model[2]
     xt_train = scaler.transform(imputer.transform(train[features].to_numpy(float)))
     xt_hold = scaler.transform(imputer.transform(hold[features].to_numpy(float)))
 
-    # 배경 표본을 전부 쓴다. 기본값(100개 추출)이면 기여도에 추출 노이즈가 섞인다.
-    masker = shap.maskers.Independent(xt_train, max_samples=len(xt_train))
-    explainer = shap.LinearExplainer(logreg, masker)
-    values = explainer.shap_values(xt_hold)
+    # 배경 분포는 학습 세트 전체를 쓴다.
+    values = linear_shap(logreg.coef_[0], xt_hold, xt_train.mean(axis=0))
 
     print("\n=== 5단계: SHAP 요인 기여 (홀드아웃 평균 절대 기여) ===")
     mean_abs = np.abs(values).mean(axis=0)
