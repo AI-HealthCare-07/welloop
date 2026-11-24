@@ -40,11 +40,22 @@ HOLDOUT_FRAC = 0.30
 #      → 이 분할의 홀드아웃은 소진된 것으로 간주한다.
 # 2차: SEED=20261125 (현재). 규칙을 고친 뒤 새로 분할해 평가한다.
 #
-# 규칙을 왜 고쳤는가: 설계 v0.2 6장은 활용 기준을 "AUROC >= 0.75 **그리고** 보정 편차
-# 전 구간 5%p 이내"로 정의한다. 그런데 선택 규칙이 보정을 보지 않았다. 기준과 선택
-# 규칙이 어긋나 있었던 것이고, 홀드아웃 결과를 보고 규칙을 바꾼 것이 아니다.
-# 또한 REQ-PRED-009·010은 개인별 요인 설명을 요구하므로, 조절 가능 요인이 하나도 없는
-# 구성(LDL 단독)은 서비스 모델 후보가 될 수 없다. 비교 기준선으로만 보고한다.
+# **평가 독립성의 한계 (리뷰 지적)**: 2차 분할은 1차와 같은 2,059명을 다시 나눈 것이므로
+# 두 홀드아웃의 인원이 상당히 겹친다. 따라서 "완전한 평가 독립성이 확보됐다"고 말할 수
+# 없다. 누출된 정보는 1차에서 본 "LDL 단독의 홀드아웃 AUROC" 한 값이고 그 구성은 후보에서
+# 제외됐으나, 독립성이 부분적으로 훼손된 상태라는 점을 결과 해석에 반영해야 한다.
+# 완전한 독립 평가를 원하면 새 코호트나 외부 데이터가 필요하다.
+#
+# 규칙을 왜 고쳤는가 (리뷰 지적 반영해 정정):
+#   유효한 근거는 하나다 — REQ-PRED-009·010이 개인별 요인 설명을 요구하므로, 조절 가능
+#   요인이 하나도 없는 구성(LDL 단독)은 성능이 같아도 서비스 모델 후보가 될 수 없다.
+#   비교 기준선으로만 보고한다.
+#
+#   처음에는 "6장 기준에 보정이 들어 있는데 선택 규칙이 보정을 보지 않는다"를 근거로 들어
+#   보정 최대 편차가 가장 작은 구성을 고르는 규칙으로 바꿨다. 그러나 그 지표가 분할 난수만
+#   바꿔도 3.0% ↔ 10.7%로 뒤집히는 것을 확인해 폐기했다. 그래서 **최종 규칙에도 보정은
+#   선택 조건으로 들어가지 않는다.** 보정은 참고 지표로 표에만 출력한다. 선택 조건은
+#   ① 조절 가능 요인 포함 ② AUROC(반복 교차검증 평균)뿐이다.
 SEED = 20261125
 
 # 변수 구성 후보. 설계 v0.2 5.5절의 계수 방향 문제를 반영해 단계적으로 줄인다.
@@ -184,6 +195,94 @@ def select_on_train(train: pd.DataFrame) -> dict[str, dict[str, tuple[float, flo
     return results
 
 
+def judge_criteria(
+    y: np.ndarray,
+    p: np.ndarray,
+    auroc: float,
+    auroc_lo: float,
+    worst10: float,
+    worst5: float,
+    rng: np.random.Generator,
+) -> None:
+    """설계 v0.2 6장 활용 기준을 판정하고 추정의 불확실성을 함께 보고한다.
+
+    기준 단위는 **10분위**다 (v0.2 6장). 5분위는 분위당 인원이 많아 덜 흔들리므로
+    보조 지표로만 쓴다. 판정을 느슨한 단위로 바꾸지 않는다.
+
+    신뢰구간은 추정이 얼마나 흔들리는지를 보여주는 것이고, 하한이 기준 이하라는 사실이
+    기준 충족을 뜻하지 않는다. 판정은 점추정으로 하고 신뢰구간은 함께 보고한다.
+    """
+    dev10, dev5 = [], []
+    for _ in range(2000):
+        i = rng.integers(0, len(y), len(y))
+        if len(np.unique(y[i])) > 1:
+            _, _, w10 = calibration_bins(y[i], p[i], 10)
+            _, _, w5 = calibration_bins(y[i], p[i], 5)
+            dev10.append(w10)
+            dev5.append(w5)
+
+    print("\n  === 6장 활용 기준 판정 (기준 단위: 10분위) ===")
+    ok_auroc = auroc >= 0.75
+    ok_cal = worst10 <= 0.05
+    print(
+        f"    AUROC >= 0.75                     {'충족' if ok_auroc else '미충족'}  ({auroc:.3f}, CI 하한 {auroc_lo:.3f})"
+    )
+    print(f"    10분위 보정 편차 전 구간 5%p 이내  {'충족' if ok_cal else '미충족'}  (최대 {100 * worst10:.1f}%p)")
+    print(f"    → 종합: {'충족' if ok_auroc and ok_cal else '미충족'}")
+    print(f"    참고(기준 아님) 5분위 최대 편차: {100 * worst5:.1f}%p")
+
+    print("\n  === 추정의 불확실성 (부트스트랩 2000회) ===")
+    print("    ※ 신뢰구간 하한이 기준 이하라는 사실은 기준 충족을 뜻하지 않는다.")
+    print("       판정은 위 점추정으로 하고, 아래는 추정이 얼마나 흔들리는지를 함께 보고한다.")
+    for tag, arr, worst in (("10분위 (기준)", dev10, worst10), ("5분위 (보조)", dev5, worst5)):
+        a = np.array(arr)
+        dlo, dhi = np.percentile(a, [2.5, 97.5])
+        print(
+            f"    {tag:<14} 점추정 {100 * worst:5.1f}%p   95% CI {100 * dlo:5.1f} ~ {100 * dhi:5.1f}%p"
+            f"   5%p 초과 비율 {100 * np.mean(a > 0.05):3.0f}%"
+        )
+
+    d10 = np.array(dev10)
+    if np.percentile(d10, 2.5) > 0.05:
+        print("    → 10분위 기준: 신뢰구간 하한도 5%p를 넘는다. 미충족이 안정적으로 관찰된다.")
+    elif np.percentile(d10, 97.5) < 0.05:
+        print("    → 10분위 기준: 신뢰구간 상한도 5%p 아래다. 충족이 안정적으로 관찰된다.")
+    else:
+        print("    → 10분위 기준: 신뢰구간이 5%p를 포함한다. 추정이 흔들리는 구간이므로")
+        print("       점추정 판정과 함께 표본 크기 한계를 보고한다.")
+
+
+def criterion_feasibility(p: np.ndarray, n_sim: int = 5000) -> None:
+    """이 표본 크기에서 5%p 기준이 달성 가능한 기준인지 확인한다.
+
+    예측확률 p를 참값으로 두고 y ~ Bernoulli(p)를 생성하면 그 모델은 **정의상 완벽히
+    보정된 모델**이다. 그런 모델에서도 분위별 관측 발생률은 표본 오차로 흔들리므로
+    최대 편차가 0이 되지 않는다. 그 분포를 보면 기준이 측정 노이즈보다 큰지 작은지
+    판단할 수 있다.
+    """
+    rng = np.random.default_rng(777)
+    print("\n  === 기준의 달성 가능성 (완벽 보정 모델 시뮬레이션) ===")
+    print(f"    예측확률을 참값으로 두고 y ~ Bernoulli(p)를 {n_sim}회 생성 (n={len(p)})")
+    for bins in (10, 5):
+        worsts, eces = [], []
+        for _ in range(n_sim):
+            y_sim = (rng.random(len(p)) < p).astype(int)
+            if len(np.unique(y_sim)) < 2:
+                continue
+            _, e, w = calibration_bins(y_sim, p, bins)
+            worsts.append(w)
+            eces.append(e)
+        w, e = np.array(worsts), np.array(eces)
+        print(
+            f"    {bins:2d}분위  최대 편차 중앙값 {100 * np.median(w):4.1f}%p"
+            f"  90% 구간 {100 * np.percentile(w, 5):4.1f}~{100 * np.percentile(w, 95):4.1f}%p"
+            f"  5%p 이내일 확률 {100 * np.mean(w <= 0.05):4.1f}%"
+            f"  ECE 중앙값 {100 * np.median(e):3.1f}%"
+        )
+    print("    ※ 완벽히 보정된 모델도 5%p 기준을 넘는다면, 그 기준은 이 표본 크기에서")
+    print("       모델의 품질을 판정하지 못한다. 측정 노이즈가 기준보다 크기 때문이다.")
+
+
 def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str], name: str) -> None:
     """홀드아웃을 단 한 번 평가한다. 이 함수는 한 번만 호출한다."""
     print(f"\n{'=' * 70}")
@@ -205,7 +304,10 @@ def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str
 
     sens = recall_score(y, p >= np.quantile(p, 0.8))
     intercept, slope = recalibration_fit(y, p)
-    _, ece5, worst5 = calibration_bins(y, p, 5)
+    # 설계 v0.2 6장 기준은 **10분위** 최대 편차 5%p 이내다. 판정은 10분위로 한다.
+    # 5분위는 분위당 인원이 많아 추정이 덜 흔들리므로 보조 지표로만 함께 본다.
+    table10, ece10, worst10 = calibration_bins(y, p, 10)
+    table5, ece5, worst5 = calibration_bins(y, p, 5)
 
     print(f"\n  홀드아웃 n={len(hold)}  발생={int(y.sum())} ({100 * y.mean():.1f}%)")
     print(f"\n  AUROC           {auroc:.3f}   95% CI [{lo:.3f}, {hi:.3f}]")
@@ -216,18 +318,20 @@ def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str
     )
     print(f"  보정 절편        {intercept:+.3f}   (0이 이상)")
     print(f"  보정 기울기      {slope:.3f}   (1이 이상)")
-    print(f"  ECE (5분위)     {100 * ece5:.1f}%")
-    print(f"  최대 편차 (5분위) {100 * worst5:.1f}%p")
+    print(f"  ECE (10분위, 기준) {100 * ece10:.1f}%")
+    print(f"  최대 편차 (10분위, 기준) {100 * worst10:.1f}%p")
+    print(f"  ECE (5분위, 보조)  {100 * ece5:.1f}%")
+    print(f"  최대 편차 (5분위, 보조)  {100 * worst5:.1f}%p")
 
-    print("\n  보정 5분위 — 홀드아웃 n이 작아 분위당 인원이 적다. 편차 해석에 주의.")
-    table, _, _ = calibration_bins(y, p, 5)
+    print(f"\n  보정 10분위 — 활용 기준의 판정 단위. 분위당 약 {len(hold) // 10}명.")
     print(f"    {'분위':>4}{'n':>6}{'예측':>9}{'실제':>9}{'차이':>10}")
-    for _, r in table.iterrows():
+    for _, r in table10.iterrows():
         print(f"    {int(r['분위']):>4}{int(r['n']):>6}{r['예측']:>8.1f}%{r['실제']:>8.1f}%{r['차이']:>+9.1f}%p")
 
-    print(f"\n  참고: 10분위 (분위당 약 {len(hold) // 10}명, 매우 불안정)")
-    _, ece10, worst10 = calibration_bins(y, p, 10)
-    print(f"    ECE {100 * ece10:.1f}%   최대 편차 {100 * worst10:.1f}%p")
+    print("\n  보정 5분위 — 보조. 분위당 인원이 많아 덜 흔들리지만 기준 단위는 아니다.")
+    print(f"    {'분위':>4}{'n':>6}{'예측':>9}{'실제':>9}{'차이':>10}")
+    for _, r in table5.iterrows():
+        print(f"    {int(r['분위']):>4}{int(r['n']):>6}{r['예측']:>8.1f}%{r['실제']:>8.1f}%{r['차이']:>+9.1f}%p")
 
     print("\n  기저 LDL 구간별 (홀드아웃)")
     for low, high in ((0, 100), (100, 130), (130, 145), (145, 160)):
@@ -240,32 +344,8 @@ def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str
             f"    LDL {low:3d}~{high:3d}  n={n:4d}  발생={k:3d} ({100 * k / n:4.1f}%)  AUROC={a:.3f}  예측평균={100 * p[m].mean():4.1f}%"
         )
 
-    # 보정 편차 자체의 불확실성. 5%p 기준을 이 표본으로 판정할 수 있는지 본다.
-    dev_boots = []
-    for _ in range(2000):
-        i = rng.integers(0, len(y), len(y))
-        if len(np.unique(y[i])) > 1:
-            _, _, w = calibration_bins(y[i], p[i], 5)
-            dev_boots.append(w)
-    dlo, dhi = np.percentile(dev_boots, [2.5, 97.5])
-    over_rate = float(np.mean(np.array(dev_boots) > 0.05))
-
-    print("\n  === 6장 활용 기준 판정 ===")
-    ok_auroc = auroc >= 0.75
-    ok_cal = worst5 <= 0.05
-    print(f"    AUROC >= 0.75                 {'충족' if ok_auroc else '미충족'}  ({auroc:.3f}, CI 하한 {lo:.3f})")
-    print(f"    보정 편차 전 구간 5%p 이내      {'충족' if ok_cal else '미충족'}  (최대 {100 * worst5:.1f}%p)")
-    print(f"    → 종합: {'충족' if ok_auroc and ok_cal else '미충족'}")
-
-    print("\n  === 이 판정을 믿을 수 있는가 (보정 편차의 불확실성) ===")
-    print(f"    최대 편차 점추정    {100 * worst5:.1f}%p")
-    print(f"    부트스트랩 95% CI   {100 * dlo:.1f}%p ~ {100 * dhi:.1f}%p")
-    print(f"    5%p를 넘길 확률     {100 * over_rate:.0f}%")
-    if dlo <= 0.05 <= dhi:
-        print("    → 신뢰구간이 5%p를 포함한다. **이 표본 크기로는 5%p 기준의 충족 여부를")
-        print("       판정할 수 없다.** 점추정이 5.1%p로 기준을 넘긴 것은 노이즈와 구분되지 않는다.")
-        print("       기준 수치를 유지하려면 더 큰 홀드아웃이, 이 표본을 쓰려면 측정 가능한")
-        print("       기준(예: 교차검증 ECE 또는 편차 신뢰구간 상한)으로 바꿔야 한다.")
+    judge_criteria(y, p, auroc, lo, worst10, worst5, rng)
+    criterion_feasibility(p)
 
 
 def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: list[str], name: str) -> None:
@@ -324,16 +404,24 @@ def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: lis
         diffs10.append(wa10 - wb10)
         diffs5.append(wa5 - wb5)
 
+    # 점추정 차이와 부트스트랩 평균 차이를 함께 낸다. 최대값은 비선형 통계량이라
+    # 두 값이 일치하지 않고 부호까지 다를 수 있다. 둘을 같은 것으로 쓰면 안 된다.
     print("\n  === 최대 편차 차이 (선택 모델 − LDL 단독). 음수면 선택 모델이 더 좋다 ===")
-    for tag, arr in (("10분위", diffs10), ("5분위", diffs5)):
+    for tag, arr, direct in (
+        ("10분위", diffs10, stats[name]["worst10"] - stats["LDL 단독"]["worst10"]),
+        ("5분위", diffs5, stats[name]["worst5"] - stats["LDL 단독"]["worst5"]),
+    ):
         arr = np.array(arr)
         lo, hi = np.percentile(arr, [2.5, 97.5])
         better = float(np.mean(arr < 0))
-        verdict = "이점 확인" if hi < 0 else ("열세 확인" if lo > 0 else "**판정 불가 (CI가 0을 포함)**")
+        verdict = "이점 확인" if hi < 0 else ("열세 확인" if lo > 0 else "판정 불가 (CI가 0을 포함)")
         print(
-            f"    {tag}  차이 {100 * arr.mean():+.1f}%p  95% CI [{100 * lo:+.1f}, {100 * hi:+.1f}]%p  "
-            f"더 좋을 확률 {100 * better:.0f}%  → {verdict}"
+            f"    {tag}  점추정 차이 {100 * direct:+.1f}%p   부트스트랩 평균 차이 {100 * arr.mean():+.1f}%p"
+            f"   95% CI [{100 * lo:+.1f}, {100 * hi:+.1f}]%p   더 좋을 확률 {100 * better:.0f}%"
         )
+        print(f"           → {verdict}")
+    print("    ※ 최대값은 비선형 통계량이라 점추정 차이와 부트스트랩 평균 차이가 일치하지")
+    print("       않으며 부호도 다를 수 있다. 어느 쪽도 단독으로 우열의 근거가 되지 못한다.")
 
     print("\n  === 학습 세트 교차검증과의 대조 ===")
     print("    설계 v0.2 5.4절(전체 데이터 교차검증): B- 최대 편차 1.5%p vs LDL 단독 3.8%p")
@@ -413,7 +501,9 @@ def main() -> None:
 
     results = select_on_train(train)
 
-    # 선택 규칙 (홀드아웃을 보기 전에 확정한다):
+    # 선택 규칙 (홀드아웃을 보기 전에 확정한다).
+    # **보정 지표는 선택 조건이 아니다** — 분할마다 뒤집혀 신뢰할 수 없다(상단 주석 참조).
+    # 아래 표에 함께 출력하지만 판단 근거로는 쓰지 않는다.
     #   ① 서비스 모델 후보만 — 조절 가능 요인이 하나 이상 (REQ-PRED-010).
     #      LDL 단독은 요인 설명이 불가능하므로 비교 기준선으로만 쓴다.
     #   ② 후보들의 AUROC 평균 차이가 반복 간 표준편차보다 작으면
