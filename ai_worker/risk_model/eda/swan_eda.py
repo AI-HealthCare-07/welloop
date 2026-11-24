@@ -21,7 +21,7 @@ import pyreadstat
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, recall_score, roc_auc_score
+from sklearn.metrics import average_precision_score, brier_score_loss, recall_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -105,12 +105,33 @@ def load_baseline() -> pd.DataFrame:
     # .to_numpy()로 넣는다 — Series 그대로 넣으면 SWANID 인덱스에 재정렬되어 전부 결측이 된다
     b = pd.DataFrame({c: clean(raw[c]).to_numpy() for c in cols if c in raw}, index=pd.Index(raw.SWANID, name="SWANID"))
     b["sbp"] = b[["SYSBP10", "SYSBP20"]].mean(axis=1)
-    b["med0"] = b.CHOLEST0 == 2  # 2 = Yes
-    b["hrt0"] = (b.HORMPIL0 == 2) | (b.ESTRPTC0 == 2) | (b.HORMCRE0 == 2)
-    b["smoke_now"] = (b.SMOKENO0 == 2).astype(float)
+
+    # 복약·호르몬제: 코드 2 = Yes. 결측은 False로 뭉개지 않고 결측으로 남긴다.
+    # 제외 기준에서 "미복용(False)"과 "정보 없음(결측)"을 구분하기 위함이다.
+    b["med0"] = (b.CHOLEST0 == 2).where(b.CHOLEST0.notna())
+    hrt_cols = ["HORMPIL0", "ESTRPTC0", "HORMCRE0"]
+    b["hrt0"] = (b[hrt_cols] == 2).any(axis=1).where(b[hrt_cols].notna().any(axis=1))
+
+    # 흡연: SMOKENO0(현재 흡연)은 SMOKERE0(흡연 경험)==2인 사람에게만 묻는다.
+    # SMOKERE0==1(경험 없음)인 1,876명은 SMOKENO0이 전원 결측이며 이는 구조적 skip이므로
+    # 비흡연(0)으로 확정한다. SMOKERE0 자체가 결측인 사람만 결측으로 남겨 대치에 맡긴다.
+    b["smoke_now"] = np.where(
+        b.SMOKERE0 == 1, 0.0, np.where(b.SMOKENO0 == 2, 1.0, np.where(b.SMOKENO0 == 1, 0.0, np.nan))
+    )
+
     b["sfat_pct"] = 9 * b.DTTSFAT0 / b.DTTKCAL0 * 100  # 포화지방 열량 비율(%)
     b["peri"] = (b.STATUS0 == 4).astype(float)  # 4 = Early Peri
     return b
+
+
+def missing_report(b: pd.DataFrame, cohort: pd.DataFrame) -> None:
+    """분석 변수의 결측률을 출력한다 (문서 4.3 재현용)."""
+    print("\n=== 분석 변수 결측률 ===")
+    print(f"  {'변수':<12}{'기저 3,302명':>14}{'분석 대상':>12}")
+    for col in [*B_PLUS, "RACE"]:
+        if col not in b:
+            continue
+        print(f"  {col:<12}{100 * b[col].isna().mean():13.1f}%{100 * cohort[col].isna().mean():11.1f}%")
 
 
 def load_followup() -> pd.DataFrame:
@@ -126,18 +147,25 @@ def load_followup() -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def judgeable(fu: pd.DataFrame) -> pd.Series:
+    """발생 여부를 판정할 수 있는 방문인지. LDL 측정됨 또는 지질강하제 복용 확인됨."""
+    return fu.ldl.notna() | fu.med
+
+
 def build_cohort(b: pd.DataFrame, fu: pd.DataFrame) -> pd.DataFrame:
     """제외 기준을 차례로 적용하고 각 단계 인원을 출력한다."""
-    last_obs = fu[fu.ldl.notna() | fu.med].groupby("SWANID").visit.max()
+    # 판정 가능 방문 = LDL이 측정됐거나 지질강하제 복용이 확인된 방문.
+    # LDL 미측정 + 미복용 방문은 "LDL>=160 발생"을 배제할 수 없으므로 관찰로 치지 않는다.
+    last_obs = fu[judgeable(fu)].groupby("SWANID").visit.max()
     steps = [("기저 조사 전체", b)]
     s = b[b.LDLRESU0.notna()]
     steps.append(("기저 LDL 측정됨", s))
     s = s[s.STATUS0.isin([3, 4, 5])]
     steps.append(("폐경 전 또는 이행기", s))
-    s = s[~s.med0]
-    steps.append(("기저 지질강하제 미복용", s))
-    s = s[~s.hrt0]
-    steps.append(("기저 호르몬제 미사용", s))
+    s = s[s.med0 == False]  # noqa: E712 — 결측(정보 없음)은 제외한다
+    steps.append(("기저 지질강하제 미복용 확인", s))
+    s = s[s.hrt0 == False]  # noqa: E712
+    steps.append(("기저 호르몬제 미사용 확인", s))
     s = s[s.LDLRESU0 < 160]
     steps.append(("기저 LDL < 160 (위험 집단)", s))
     s = s[s.index.isin(last_obs.index)]
@@ -156,15 +184,20 @@ def build_cohort(b: pd.DataFrame, fu: pd.DataFrame) -> pd.DataFrame:
 
 
 def label(fu: pd.DataFrame, cohort: pd.DataFrame, window: int, include_med: bool) -> pd.DataFrame:
-    """기간 안의 발생 여부를 라벨로 만들고 중도절단된 사람을 제외한다."""
+    """기간 안의 발생 여부를 라벨로 만들고 판정 근거가 없는 사람을 제외한다."""
     f = fu[fu.visit.between(1, window)]
     if include_med:
         event = f.groupby("SWANID").apply(lambda g: bool((g.ldl >= 160).any() or g.med.any()))
     else:
         event = f.groupby("SWANID").apply(lambda g: bool((g.ldl >= 160).any()))
     d = cohort.copy()
-    d["y"] = event.reindex(d.index).fillna(False)
-    return d[d.y | (d.last_obs >= window)]  # 발생했거나 기간 끝까지 관찰된 사람만
+    d["y"] = event.reindex(d.index).fillna(False).astype(bool)
+
+    # 기간 안에 판정 가능 방문이 한 번도 없는 사람은 음성 라벨의 근거가 없으므로 제외한다.
+    # 이 조건이 없으면 기간 밖(V6~V7)에만 관찰된 사람이 자동으로 음성이 된다.
+    in_window = fu[fu.visit.between(1, window) & judgeable(fu)].SWANID.unique()
+    keep = d.y | (d.last_obs >= window)
+    return d[keep & d.index.isin(in_window)]
 
 
 def cv_proba(d: pd.DataFrame, features: list[str], kind: str = "LR") -> np.ndarray:
@@ -188,24 +221,87 @@ def cv_auroc(d: pd.DataFrame, features: list[str]) -> tuple[float, np.ndarray]:
     return roc_auc_score(d.y.astype(int), proba), proba
 
 
+B_SERVICE = [*A_SERVICE, "LDLRESU0"]  # 서비스안: 소득 제외
+VARIABLE_SETS = [
+    ("A 문진·계측", A_FEATURES),
+    ("A- 소득 제외", A_SERVICE),
+    ("A- 포화지방도 제외", [c for c in A_SERVICE if c != "sfat_pct"]),
+    ("B  A+LDL", B_FEATURES),
+    ("B- 소득 제외", B_SERVICE),
+    ("B- 포화지방도 제외", [c for c in B_SERVICE if c != "sfat_pct"]),
+    ("B+ 지질 5종", B_PLUS),
+    ("LDL 단독", ["LDLRESU0"]),
+]
+
+
 def compare_models(d: pd.DataFrame) -> None:
-    """변수 세트 x 모델별로 지표 3개를 비교한다 (요구사항 NFR-006)."""
+    """변수 세트 x 모델별로 지표 3개를 비교한다 (요구사항 DR-010)."""
     print("\n=== 변수 세트 x 모델 (AUROC / AUPRC / 상위 20% 선별 민감도) ===")
     y = d.y.astype(int).to_numpy()
-    sets = [
-        ("A 문진·계측", A_FEATURES),
-        ("A- 소득 제외", A_SERVICE),
-        ("B  A+LDL", B_FEATURES),
-        ("B- 소득 제외", [*A_SERVICE, "LDLRESU0"]),
-        ("B+ 지질 5종", B_PLUS),
-        ("LDL 단독", ["LDLRESU0"]),
-    ]
-    print(f"{'변수 세트':20s}{'모델':6s}{'AUROC':>8s}{'AUPRC':>8s}{'민감도':>8s}")
-    for name, features in sets:
+    print(f"{'변수 세트':22s}{'모델':6s}{'AUROC':>8s}{'AUPRC':>8s}{'민감도':>8s}")
+    for name, features in VARIABLE_SETS:
         for kind in ("LR", "GB"):
             p = cv_proba(d, features, kind)
             sens = recall_score(y, p >= np.quantile(p, 0.8))
-            print(f"{name:20s}{kind:6s}{roc_auc_score(y, p):>8.3f}{average_precision_score(y, p):>8.3f}{sens:>8.3f}")
+            print(f"{name:22s}{kind:6s}{roc_auc_score(y, p):>8.3f}{average_precision_score(y, p):>8.3f}{sens:>8.3f}")
+
+
+def calibration_report(d: pd.DataFrame) -> None:
+    """보정 성능을 모델별로 비교한다 (DR-010 확률 보정 평가).
+
+    Brier score는 낮을수록 좋다. 절편 0 / 기울기 1 이 완벽한 보정이고,
+    기울기 < 1 은 과대 산포(극단 확률을 너무 자신 있게 내놓음)를 뜻한다.
+    ECE는 10분위 안에서 |예측 평균 − 실제 발생률|을 인원 가중 평균한 값이다.
+    """
+    print("\n=== 보정 성능 비교 (DR-010) ===")
+    y = d.y.astype(int).to_numpy()
+    base = y.mean()
+    print(
+        f"  무정보 기준선(항상 {100 * base:.1f}% 예측) Brier = {brier_score_loss(y, np.full_like(y, base, dtype=float)):.4f}"
+    )
+    print(f"  {'모델':<22}{'Brier':>9}{'절편':>8}{'기울기':>8}{'ECE':>8}{'최대편차':>9}")
+    for name, features in [("B  A+LDL", B_FEATURES), ("B- 서비스안", B_SERVICE), ("LDL 단독", ["LDLRESU0"])]:
+        p = np.clip(cv_proba(d, features), 1e-6, 1 - 1e-6)
+        logit = np.log(p / (1 - p)).reshape(-1, 1)
+        recal = LogisticRegression().fit(logit, y)
+        slope = float(recal.coef_[0][0])
+        intercept = float(recal.intercept_[0])
+        q = pd.qcut(p, 10, labels=False, duplicates="drop")
+        gaps, sizes = [], []
+        for g in np.unique(q):
+            m = q == g
+            gaps.append(abs(p[m].mean() - y[m].mean()))
+            sizes.append(m.sum())
+        ece = float(np.average(gaps, weights=sizes))
+        print(
+            f"  {name:<22}{brier_score_loss(y, p):>9.4f}{intercept:>8.3f}{slope:>8.3f}"
+            f"{100 * ece:>7.1f}%{100 * max(gaps):>8.1f}%"
+        )
+
+
+def calibration_curve_table(d: pd.DataFrame, features: list[str], label_name: str, bins: int = 10) -> None:
+    """10분위 보정 곡선 수치를 표로 낸다."""
+    y = d.y.astype(int).to_numpy()
+    p = cv_proba(d, features)
+    q = pd.qcut(p, bins, labels=False, duplicates="drop")
+    print(f"\n=== 보정 곡선 10분위 — {label_name} ===")
+    print(f"  {'분위':>4}{'n':>7}{'예측 평균':>11}{'실제 발생률':>13}{'차이':>9}")
+    for g in np.unique(q):
+        m = q == g
+        pred, obs = 100 * p[m].mean(), 100 * y[m].mean()
+        print(f"  {g + 1:>4}{int(m.sum()):>7}{pred:>10.1f}%{obs:>12.1f}%{obs - pred:>+8.1f}%p")
+
+
+def coefficients(d: pd.DataFrame) -> None:
+    """서비스안(B-) 로지스틱 회귀의 표준화 계수를 낸다 (문서 5.5 재현용)."""
+    print("\n=== B- 서비스안 표준화 회귀계수 (전체 적합) ===")
+    pipe = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(max_iter=3000))
+    pipe.fit(d[B_SERVICE].to_numpy(float), d.y.astype(int))
+    coef = pipe[-1].coef_[0]
+    order = np.argsort(-np.abs(coef))
+    print("  ※ 표준화 계수이므로 변수 간 크기 비교는 가능하나 인과적 해석은 불가 (SR-027)")
+    for i in order:
+        print(f"  {B_SERVICE[i]:<12}{coef[i]:>+8.3f}")
 
 
 def performance_by_ldl(d: pd.DataFrame, proba: np.ndarray) -> None:
@@ -338,12 +434,17 @@ def main() -> None:
         f"\n[권고안: 5년 내 LDL>=160 또는 약 시작] n={len(primary)} "
         f"발생={int(primary.y.sum())} ({100 * primary.y.mean():.1f}%)"
     )
+    missing_report(baseline, primary)
     compare_models(primary)
     proba = bootstrap_gap(primary)
     report_risk_groups(primary, proba)
     performance_by_ldl(primary, proba)
     performance_by_race(primary, proba)
     censoring_check(cohort, primary)
+    calibration_report(primary)
+    calibration_curve_table(primary, B_SERVICE, "B- 서비스안")
+    calibration_curve_table(primary, ["LDLRESU0"], "LDL 단독")
+    coefficients(primary)
 
 
 if __name__ == "__main__":
