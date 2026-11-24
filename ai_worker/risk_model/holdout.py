@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from ai_worker.risk_model.eda.swan_eda import build_cohort, label, load_baseline, load_followup
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, recall_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+
+from ai_worker.risk_model.eda.swan_eda import build_cohort, label, load_baseline, load_followup
 
 SEED = 20261124
 SEED_BURNED = 20261124  # 1차 분할. 아래 "홀드아웃 사용 이력" 참조
