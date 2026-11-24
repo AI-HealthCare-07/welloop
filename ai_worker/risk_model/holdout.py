@@ -315,10 +315,22 @@ def criterion_feasibility(p: np.ndarray, n_sim: int = 5000) -> None:
             f"    {bins:2d}분위  최대 편차 중앙값 {100 * np.median(w):4.1f}%p"
             f"  90% 구간 {100 * np.percentile(w, 5):4.1f}~{100 * np.percentile(w, 95):4.1f}%p"
             f"  5%p 이내일 확률 {100 * np.mean(w <= 0.05):4.1f}%"
-            f"  ECE 중앙값 {100 * np.median(e):3.1f}%"
+        )
+        print(
+            f"            ECE 중앙값 {100 * np.median(e):3.1f}%"
+            f"  90분위 {100 * np.percentile(e, 90):3.1f}%"
+            f"  95분위 {100 * np.percentile(e, 95):3.1f}%"
+            f"  99분위 {100 * np.percentile(e, 99):3.1f}%"
+            f"  최대 {100 * e.max():3.1f}%"
+        )
+        print(
+            f"            ECE 5% 이내일 확률 {100 * np.mean(e <= 0.05):4.1f}%"
+            f"   → 기준을 ECE 5%로 두면 완벽 모델을 {100 * np.mean(e > 0.05):.1f}% 확률로 탈락시킨다"
         )
     print("    ※ 완벽히 보정된 모델도 5%p 기준을 넘는다면, 그 기준은 이 표본 크기에서")
     print("       모델의 품질을 판정하지 못한다. 측정 노이즈가 기준보다 크기 때문이다.")
+    print("    ※ ECE 분위수는 기준값 설정의 근거로 쓴다. 완벽 모델이 그 값을 넘을 확률이")
+    print("       곧 '제대로 보정된 모델을 잘못 탈락시킬 확률'(1종 오류)이다 (리뷰 요청).")
 
 
 def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str], name: str) -> None:
