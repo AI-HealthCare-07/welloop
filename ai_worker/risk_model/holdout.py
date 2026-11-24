@@ -333,6 +333,49 @@ def criterion_feasibility(p: np.ndarray, n_sim: int = 5000) -> None:
     print("       곧 '제대로 보정된 모델을 잘못 탈락시킬 확률'(1종 오류)이다 (리뷰 요청).")
 
 
+def criterion_power(p: np.ndarray, n_sim: int = 2000) -> None:
+    """기준이 **보정 불량 모델을 걸러내는지** 확인한다 (검정력).
+
+    달성 가능성(criterion_feasibility)은 1종 오류만 본다. 좋은 모델을 떨어뜨릴
+    확률이 낮다는 것만으로는 기준이 쓸모 있다고 말할 수 없다. "ECE 50% 이내"도
+    1종 오류가 0%지만 아무것도 걸러내지 못한다 (리뷰 지적).
+
+    모델은 p를 주장하는데 실제 발생확률이 p_true로 어긋난 상황을 만든다.
+      - 절편 이동: p_true = sigmoid(logit(p) + delta)  — 전 구간 체계적 과소·과대
+      - 기울기 왜곡: p_true = sigmoid(a * logit(p))     — 극단 확률에서 과신
+    y는 p_true로 생성하고, 보정은 모델이 주장한 p에 대해 측정한다. 기준이 깨지는
+    비율이 검정력이다.
+    """
+    rng = np.random.default_rng(20261126)
+    eps = 1e-6
+    logit_p = np.log(np.clip(p, eps, 1 - eps) / np.clip(1 - p, eps, 1 - eps))
+
+    scenarios: list[tuple[str, np.ndarray]] = [("보정 정확 (귀무)", p)]
+    for delta in (0.3, 0.6, 1.0):
+        scenarios.append((f"절편 이동 +{delta:.1f}", 1 / (1 + np.exp(-(logit_p + delta)))))
+    for a in (0.7, 0.5):
+        scenarios.append((f"기울기 {a:.1f}", 1 / (1 + np.exp(-a * logit_p))))
+
+    print("\n  === 기준의 검정력 (보정 불량 모델을 걸러내는가) ===")
+    print("    모델은 p를 주장하지만 실제 발생확률은 p_true로 어긋난 상황을 만든다.")
+    print(f"    시나리오별 {n_sim}회. 괄호 안은 |p − p_true| 평균 (실제 어긋남의 크기).")
+    print(f"    {'시나리오':<20}{'어긋남':>8}{'ECE≤5% 탈락률':>16}{'최대편차≤5%p 탈락률':>22}")
+    for tag, p_true in scenarios:
+        gap = float(np.abs(p - p_true).mean())
+        rej_ece, rej_worst, used = 0, 0, 0
+        for _ in range(n_sim):
+            y_sim = (rng.random(len(p)) < p_true).astype(int)
+            if len(np.unique(y_sim)) < 2:
+                continue
+            used += 1
+            _, ece, worst = calibration_bins(y_sim, p, 10)
+            rej_ece += ece > 0.05
+            rej_worst += worst > 0.05
+        print(f"    {tag:<20}{100 * gap:>7.1f}%p{100 * rej_ece / used:>15.1f}%{100 * rej_worst / used:>21.1f}%")
+    print("    ※ 첫 줄은 1종 오류(좋은 모델을 떨어뜨릴 확률), 나머지는 검정력이다.")
+    print("       최대편차 기준은 탈락률이 어느 시나리오에서나 높아 둘을 구분하지 못한다.")
+
+
 def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str], name: str) -> None:
     """홀드아웃을 단 한 번 평가한다. 이 함수는 한 번만 호출한다."""
     print(f"\n{'=' * 70}")
@@ -396,6 +439,7 @@ def evaluate_holdout(train: pd.DataFrame, hold: pd.DataFrame, features: list[str
 
     judge_criteria(y, p, auroc, lo, worst10, worst5, rng)
     criterion_feasibility(p)
+    criterion_power(p)
 
 
 def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: list[str], name: str) -> None:
@@ -441,18 +485,19 @@ def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: lis
 
     # 차이의 불확실성. "이점이 유지되는가"는 차이의 신뢰구간이 0을 포함하는지로 답한다.
     rng = np.random.default_rng(SEED + 1)
-    diffs10, diffs5 = [], []
+    diffs10, diffs5, diff_ece = [], [], []
     pa, pb = probs[name], probs["LDL 단독"]
     for _ in range(2000):
         i = rng.integers(0, len(y), len(y))
         if len(np.unique(y[i])) < 2:
             continue
-        _, _, wa10 = calibration_bins(y[i], pa[i], 10)
-        _, _, wb10 = calibration_bins(y[i], pb[i], 10)
+        _, ea10, wa10 = calibration_bins(y[i], pa[i], 10)
+        _, eb10, wb10 = calibration_bins(y[i], pb[i], 10)
         _, _, wa5 = calibration_bins(y[i], pa[i], 5)
         _, _, wb5 = calibration_bins(y[i], pb[i], 5)
         diffs10.append(wa10 - wb10)
         diffs5.append(wa5 - wb5)
+        diff_ece.append(ea10 - eb10)
 
     # 점추정 차이와 부트스트랩 평균 차이를 함께 낸다. 최대값은 비선형 통계량이라
     # 두 값이 일치하지 않고 부호까지 다를 수 있다. 둘을 같은 것으로 쓰면 안 된다.
@@ -472,6 +517,19 @@ def compare_with_baseline(train: pd.DataFrame, hold: pd.DataFrame, features: lis
         print(f"           → {verdict}")
     print("    ※ 최대값은 비선형 통계량이라 점추정 차이와 부트스트랩 평균 차이가 일치하지")
     print("       않으며 부호도 다를 수 있다. 어느 쪽도 단독으로 우열의 근거가 되지 못한다.")
+
+    # ECE 차이도 같은 방식으로 본다. 기준 통계량으로 쓸 후보이므로, 두 모델을
+    # 구분하는지 점추정만으로 말하면 안 된다 (리뷰 지적).
+    arr = np.array(diff_ece)
+    lo, hi = np.percentile(arr, [2.5, 97.5])
+    direct = stats[name]["ece10"] - stats["LDL 단독"]["ece10"]
+    verdict = "차이 확인" if hi < 0 or lo > 0 else "판정 불가 (CI가 0을 포함)"
+    print("\n  === ECE(10분위) 차이 (선택 모델 − LDL 단독) ===")
+    print(
+        f"    점추정 차이 {100 * direct:+.1f}%p   부트스트랩 평균 차이 {100 * arr.mean():+.1f}%p"
+        f"   95% CI [{100 * lo:+.1f}, {100 * hi:+.1f}]%p"
+    )
+    print(f"    → {verdict}")
 
     print("\n  === 학습 세트 교차검증과의 대조 ===")
     print("    설계 v0.2 5.4절(전체 데이터 교차검증): B- 최대 편차 1.5%p vs LDL 단독 3.8%p")
