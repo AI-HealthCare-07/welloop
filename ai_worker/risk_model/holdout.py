@@ -115,6 +115,44 @@ LABELS = {
     "LDLRESU0": "기저 LDL",
 }
 
+# 개인별 설명 예시에 쓰는 **가상 입력값**이다.
+#
+# 홀드아웃 실제 대상자를 뽑아 쓰지 않는다. SWAN은 ICPSR 제한 이용 데이터이고
+# 이 레포지토리는 공개되어 있어, 개인 단위 건강정보와 발생 여부를 함께 싣는 것은
+# 데이터 이용 조건에 어긋난다 (리뷰 지적, DR-015·DR-016).
+#
+# 아래 값은 폐경 이행기 여성의 범위 안에서 임의로 지은 반올림 수치다.
+# 기여값은 실제 학습된 계수로 계산하므로 **모델의 거동은 사실 그대로**이고,
+# 특정 참여자를 나타내지는 않는다. 가상이므로 실제 발생 여부도 없다.
+SYNTHETIC_CASES: dict[str, dict[str, float]] = {
+    "저위험·흡연": {
+        "AGE0": 50,
+        "BMI0": 22,
+        "WAIST0": 70,
+        "peri": 1,
+        "HOTFLAS0": 2,
+        "NITESWE0": 1,
+        "smoke_now": 1,
+        "SPORTS0": 3,
+        "sfat_pct": 10,
+        "sbp": 120,
+        "LDLRESU0": 100,
+    },
+    "고위험·복부비만": {
+        "AGE0": 48,
+        "BMI0": 32,
+        "WAIST0": 115,
+        "peri": 0,
+        "HOTFLAS0": 3,
+        "NITESWE0": 2,
+        "smoke_now": 0,
+        "SPORTS0": 2,
+        "sfat_pct": 14,
+        "sbp": 130,
+        "LDLRESU0": 150,
+    },
+}
+
 
 def pipeline() -> object:
     """결측 대치 → 표준화 → 로지스틱 회귀. 설계 v0.2에서 선정한 구성."""
@@ -471,20 +509,27 @@ def shap_report(train: pd.DataFrame, hold: pd.DataFrame, features: list[str]) ->
     print(f"  조절 가능 요인 합계  {mod_share:.3f} ({100 * mod_share / total:.1f}%)")
     print("  ※ 조절 가능 요인 비중이 작으므로 화면에서는 두 묶음을 분리해 표시해야 한다 (10-1절)")
 
-    print("\n=== 개인별 설명 예시 (홀드아웃에서 예측확률 분위별 1명) ===")
-    p = model.predict_proba(hold[features].to_numpy(float))[:, 1]
-    for tag, target in (("낮음", 0.10), ("중간", 0.35), ("높음", 0.65)):
-        i = int(np.argmin(np.abs(p - target)))
-        print(f"\n  [{tag}] 5년 발생 확률 {100 * p[i]:.1f}%  (실제 {'발생' if hold.y.to_numpy()[i] else '미발생'})")
-        contrib = sorted(
-            ((features[j], values[i, j]) for j in range(len(features))),
-            key=lambda t: -abs(t[1]),
-        )
-        for f, v in contrib:
-            kind = "조절 가능" if f in MODIFIABLE else "고정"
-            raw = hold[f].to_numpy()[i]
-            raw_txt = "결측" if pd.isna(raw) else f"{raw:.1f}"
-            print(f"    {LABELS.get(f, f):<12} 값 {raw_txt:>7}   기여 {v:+.3f}   {kind}")
+    synthetic_examples(model, features, xt_train.mean(axis=0))
+
+
+def synthetic_examples(model: object, features: list[str], background: np.ndarray) -> None:
+    """가상 입력값으로 개인별 설명 화면을 예시한다.
+
+    실제 참여자를 쓰지 않는 이유는 SYNTHETIC_CASES 주석 참조.
+    기여값은 학습된 계수로 계산하므로 모델의 거동 자체는 사실 그대로다.
+    """
+    imputer, scaler, logreg = model[0], model[1], model[2]
+    print("\n=== 개인별 설명 예시 (가상 입력값) ===")
+    print("  ※ 실제 SWAN 참여자가 아니다. 임의로 지은 값이며 실제 발생 여부도 없다.")
+    for tag, case in SYNTHETIC_CASES.items():
+        x = np.array([[float(case[f]) for f in features]])
+        p = model.predict_proba(x)[0, 1]
+        v = linear_shap(logreg.coef_[0], scaler.transform(imputer.transform(x)), background)[0]
+        print(f"\n  [{tag}] 5년 발생 확률 {100 * p:.1f}%  (가상 사례)")
+        for j in sorted(range(len(features)), key=lambda j: -abs(v[j])):
+            kind = "조절 가능" if features[j] in MODIFIABLE else "고정"
+            label = LABELS.get(features[j], features[j])
+            print(f"    {label:<12} 값 {case[features[j]]:>7.1f}   기여 {v[j]:+.3f}   {kind}")
 
 
 def main() -> None:
