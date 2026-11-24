@@ -18,9 +18,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyreadstat
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
@@ -29,13 +29,31 @@ from sklearn.preprocessing import StandardScaler
 warnings.filterwarnings("ignore")
 
 DATA_DIR = Path("data/raw/swan")
-VISITS = {0: "ICPSR_28762", 1: "ICPSR_29221", 3: "ICPSR_29701",
-          4: "ICPSR_30142", 5: "ICPSR_30501", 6: "ICPSR_31181", 7: "ICPSR_31901"}
+VISITS = {
+    0: "ICPSR_28762",
+    1: "ICPSR_29221",
+    3: "ICPSR_29701",
+    4: "ICPSR_30142",
+    5: "ICPSR_30501",
+    6: "ICPSR_31181",
+    7: "ICPSR_31901",
+}
 
 # 분석 변수
-A_FEATURES = ["AGE0", "BMI0", "WAIST0", "peri", "HOTFLAS0", "NITESWE0",
-              "smoke_now", "SPORTS0", "INCOME0", "sfat_pct", "sbp"]
-A_SERVICE = [c for c in A_FEATURES if c != "INCOME0"]   # 소득은 서비스에서 수집하지 않음
+A_FEATURES = [
+    "AGE0",
+    "BMI0",
+    "WAIST0",
+    "peri",
+    "HOTFLAS0",
+    "NITESWE0",
+    "smoke_now",
+    "SPORTS0",
+    "INCOME0",
+    "sfat_pct",
+    "sbp",
+]
+A_SERVICE = [c for c in A_FEATURES if c != "INCOME0"]  # 소득은 서비스에서 수집하지 않음
 B_FEATURES = [*A_FEATURES, "LDLRESU0"]
 B_PLUS = [*B_FEATURES, "HDLRESU0", "TRIGRES0", "CHOLRES0", "GLUCRES0"]
 
@@ -57,20 +75,41 @@ def clean(series: pd.Series) -> pd.Series:
 def load_baseline() -> pd.DataFrame:
     """기저 조사에서 분석 변수를 뽑아 파생 변수까지 만든다."""
     raw, _ = pyreadstat.read_sav(sav_path(0))
-    cols = ["RACE", "AGE0", "STATUS0", "BMI0", "WAIST0", "HOTFLAS0", "NITESWE0",
-            "SMOKERE0", "SMOKENO0", "SPORTS0", "INCOME0",
-            "DTTKCAL0", "DTTSFAT0", "DTTFAT0", "SYSBP10", "SYSBP20",
-            "LDLRESU0", "CHOLRES0", "HDLRESU0", "TRIGRES0", "GLUCRES0",
-            "CHOLEST0", "HORMPIL0", "ESTRPTC0", "HORMCRE0"]
+    cols = [
+        "RACE",
+        "AGE0",
+        "STATUS0",
+        "BMI0",
+        "WAIST0",
+        "HOTFLAS0",
+        "NITESWE0",
+        "SMOKERE0",
+        "SMOKENO0",
+        "SPORTS0",
+        "INCOME0",
+        "DTTKCAL0",
+        "DTTSFAT0",
+        "DTTFAT0",
+        "SYSBP10",
+        "SYSBP20",
+        "LDLRESU0",
+        "CHOLRES0",
+        "HDLRESU0",
+        "TRIGRES0",
+        "GLUCRES0",
+        "CHOLEST0",
+        "HORMPIL0",
+        "ESTRPTC0",
+        "HORMCRE0",
+    ]
     # .to_numpy()로 넣는다 — Series 그대로 넣으면 SWANID 인덱스에 재정렬되어 전부 결측이 된다
-    b = pd.DataFrame({c: clean(raw[c]).to_numpy() for c in cols if c in raw},
-                     index=pd.Index(raw.SWANID, name="SWANID"))
+    b = pd.DataFrame({c: clean(raw[c]).to_numpy() for c in cols if c in raw}, index=pd.Index(raw.SWANID, name="SWANID"))
     b["sbp"] = b[["SYSBP10", "SYSBP20"]].mean(axis=1)
-    b["med0"] = b.CHOLEST0 == 2                                   # 2 = Yes
+    b["med0"] = b.CHOLEST0 == 2  # 2 = Yes
     b["hrt0"] = (b.HORMPIL0 == 2) | (b.ESTRPTC0 == 2) | (b.HORMCRE0 == 2)
     b["smoke_now"] = (b.SMOKENO0 == 2).astype(float)
-    b["sfat_pct"] = 9 * b.DTTSFAT0 / b.DTTKCAL0 * 100             # 포화지방 열량 비율(%)
-    b["peri"] = (b.STATUS0 == 4).astype(float)                    # 4 = Early Peri
+    b["sfat_pct"] = 9 * b.DTTSFAT0 / b.DTTKCAL0 * 100  # 포화지방 열량 비율(%)
+    b["peri"] = (b.STATUS0 == 4).astype(float)  # 4 = Early Peri
     return b
 
 
@@ -91,12 +130,18 @@ def build_cohort(b: pd.DataFrame, fu: pd.DataFrame) -> pd.DataFrame:
     """제외 기준을 차례로 적용하고 각 단계 인원을 출력한다."""
     last_obs = fu[fu.ldl.notna() | fu.med].groupby("SWANID").visit.max()
     steps = [("기저 조사 전체", b)]
-    s = b[b.LDLRESU0.notna()];              steps.append(("기저 LDL 측정됨", s))
-    s = s[s.STATUS0.isin([3, 4, 5])];       steps.append(("폐경 전 또는 이행기", s))
-    s = s[~s.med0];                         steps.append(("기저 지질강하제 미복용", s))
-    s = s[~s.hrt0];                         steps.append(("기저 호르몬제 미사용", s))
-    s = s[s.LDLRESU0 < 160];                steps.append(("기저 LDL < 160 (위험 집단)", s))
-    s = s[s.index.isin(last_obs.index)];    steps.append(("추적 관찰 1회 이상", s))
+    s = b[b.LDLRESU0.notna()]
+    steps.append(("기저 LDL 측정됨", s))
+    s = s[s.STATUS0.isin([3, 4, 5])]
+    steps.append(("폐경 전 또는 이행기", s))
+    s = s[~s.med0]
+    steps.append(("기저 지질강하제 미복용", s))
+    s = s[~s.hrt0]
+    steps.append(("기저 호르몬제 미사용", s))
+    s = s[s.LDLRESU0 < 160]
+    steps.append(("기저 LDL < 160 (위험 집단)", s))
+    s = s[s.index.isin(last_obs.index)]
+    steps.append(("추적 관찰 1회 이상", s))
 
     print("=== 제외 기준별 대상자 수 ===")
     prev = None
@@ -119,20 +164,22 @@ def label(fu: pd.DataFrame, cohort: pd.DataFrame, window: int, include_med: bool
         event = f.groupby("SWANID").apply(lambda g: bool((g.ldl >= 160).any()))
     d = cohort.copy()
     d["y"] = event.reindex(d.index).fillna(False)
-    return d[d.y | (d.last_obs >= window)]          # 발생했거나 기간 끝까지 관찰된 사람만
+    return d[d.y | (d.last_obs >= window)]  # 발생했거나 기간 끝까지 관찰된 사람만
 
 
 def cv_proba(d: pd.DataFrame, features: list[str], kind: str = "LR") -> np.ndarray:
     """5겹 교차검증 예측확률을 돌려준다. 대치·표준화는 폴드 안에서만 수행한다."""
     if kind == "LR":
-        model = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(),
-                              LogisticRegression(max_iter=3000))
+        model = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(max_iter=3000))
     else:
-        model = HistGradientBoostingClassifier(max_depth=3, learning_rate=0.06,
-                                               max_iter=250, random_state=0)
-    return cross_val_predict(model, d[features].to_numpy(float), d.y.astype(int),
-                             cv=StratifiedKFold(5, shuffle=True, random_state=0),
-                             method="predict_proba")[:, 1]
+        model = HistGradientBoostingClassifier(max_depth=3, learning_rate=0.06, max_iter=250, random_state=0)
+    return cross_val_predict(
+        model,
+        d[features].to_numpy(float),
+        d.y.astype(int),
+        cv=StratifiedKFold(5, shuffle=True, random_state=0),
+        method="predict_proba",
+    )[:, 1]
 
 
 def cv_auroc(d: pd.DataFrame, features: list[str]) -> tuple[float, np.ndarray]:
@@ -145,16 +192,20 @@ def compare_models(d: pd.DataFrame) -> None:
     """변수 세트 x 모델별로 지표 3개를 비교한다 (요구사항 NFR-006)."""
     print("\n=== 변수 세트 x 모델 (AUROC / AUPRC / 상위 20% 선별 민감도) ===")
     y = d.y.astype(int).to_numpy()
-    sets = [("A 문진·계측", A_FEATURES), ("A- 소득 제외", A_SERVICE),
-            ("B  A+LDL", B_FEATURES), ("B- 소득 제외", [*A_SERVICE, "LDLRESU0"]),
-            ("B+ 지질 5종", B_PLUS), ("LDL 단독", ["LDLRESU0"])]
+    sets = [
+        ("A 문진·계측", A_FEATURES),
+        ("A- 소득 제외", A_SERVICE),
+        ("B  A+LDL", B_FEATURES),
+        ("B- 소득 제외", [*A_SERVICE, "LDLRESU0"]),
+        ("B+ 지질 5종", B_PLUS),
+        ("LDL 단독", ["LDLRESU0"]),
+    ]
     print(f"{'변수 세트':20s}{'모델':6s}{'AUROC':>8s}{'AUPRC':>8s}{'민감도':>8s}")
     for name, features in sets:
         for kind in ("LR", "GB"):
             p = cv_proba(d, features, kind)
             sens = recall_score(y, p >= np.quantile(p, 0.8))
-            print(f"{name:20s}{kind:6s}{roc_auc_score(y, p):>8.3f}"
-                  f"{average_precision_score(y, p):>8.3f}{sens:>8.3f}")
+            print(f"{name:20s}{kind:6s}{roc_auc_score(y, p):>8.3f}{average_precision_score(y, p):>8.3f}{sens:>8.3f}")
 
 
 def performance_by_ldl(d: pd.DataFrame, proba: np.ndarray) -> None:
@@ -165,32 +216,68 @@ def performance_by_ldl(d: pd.DataFrame, proba: np.ndarray) -> None:
         mask = ((d.LDLRESU0 >= low) & (d.LDLRESU0 < high)).to_numpy()
         n, k = int(mask.sum()), int(y[mask].sum())
         auroc = roc_auc_score(y[mask], proba[mask]) if 0 < k < n else float("nan")
-        print(f"  LDL {low:3d}~{high:3d}  n={n:4d}  발생={k:3d} ({100 * k / n:4.1f}%)  "
-              f"구간 내 AUROC={auroc:.3f}  예측확률 평균={100 * proba[mask].mean():4.1f}%")
+        print(
+            f"  LDL {low:3d}~{high:3d}  n={n:4d}  발생={k:3d} ({100 * k / n:4.1f}%)  "
+            f"구간 내 AUROC={auroc:.3f}  예측확률 평균={100 * proba[mask].mean():4.1f}%"
+        )
+
+
+def performance_by_race(d: pd.DataFrame, proba: np.ndarray, n_boot: int = 2000) -> None:
+    """인종별 하위 성능을 신뢰구간과 함께 낸다 (문서 7.1 — 참고용, 표본이 작다)."""
+    names = {1: "흑인", 2: "중국계", 3: "일본계", 4: "백인", 5: "히스패닉"}
+    y = d.y.astype(int).to_numpy()
+    race = d.RACE.to_numpy()
+    rng = np.random.default_rng(0)
+    print("\n=== 인종별 하위 성능 (참고용) ===")
+    print(f"  {'집단':<9}{'n':>6}{'발생':>6}{'AUROC':>8}{'  95% CI':>20}{'  CI 폭':>9}")
+    for code, name in names.items():
+        mask = race == code
+        yy, pp = y[mask], proba[mask]
+        if yy.sum() < 5:
+            continue
+        boots = []
+        for _ in range(n_boot):
+            idx = rng.integers(0, len(yy), len(yy))
+            if len(np.unique(yy[idx])) > 1:
+                boots.append(roc_auc_score(yy[idx], pp[idx]))
+        lo, hi = np.percentile(boots, [2.5, 97.5])
+        print(
+            f"  {name:<9}{len(yy):>6}{int(yy.sum()):>6}{roc_auc_score(yy, pp):>8.3f}"
+            f"   [{lo:.3f}, {hi:.3f}]{hi - lo:>9.3f}"
+        )
+    print("  ※ 신뢰구간이 서로 겹치므로 집단 간 순위는 주장할 수 없다. 개별 수치 단독 인용 금지.")
 
 
 def censoring_check(cohort: pd.DataFrame, analyzed: pd.DataFrame) -> None:
     """중도절단된 사람과 분석 대상의 특성을 비교한다 (선택편향 점검)."""
     print("\n=== 중도절단 선택편향 점검 ===")
     censored = cohort[~cohort.index.isin(analyzed.index)]
-    for col, name in (("AGE0", "나이"), ("BMI0", "BMI"), ("WAIST0", "허리둘레"),
-                      ("LDLRESU0", "기저 LDL"), ("smoke_now", "현재 흡연율")):
+    for col, name in (
+        ("AGE0", "나이"),
+        ("BMI0", "BMI"),
+        ("WAIST0", "허리둘레"),
+        ("LDLRESU0", "기저 LDL"),
+        ("smoke_now", "현재 흡연율"),
+    ):
         print(f"  {name:9s} 분석 {analyzed[col].mean():6.2f}   중도절단 {censored[col].mean():6.2f}")
 
 
 def compare_windows(cohort: pd.DataFrame, fu: pd.DataFrame) -> None:
     """예측 기간 × 발생 정의 조합을 비교한다."""
     print("\n=== 예측 기간 × 발생 정의 ===")
-    print(f"{'기간':8s}{'정의':20s}{'분석':>6s}{'중도절단':>8s}{'발생':>6s}{'발생률':>8s}"
-          f"{'A':>8s}{'B':>8s}{'B+':>8s}{'LDL단독':>9s}")
+    print(
+        f"{'기간':8s}{'정의':20s}{'분석':>6s}{'중도절단':>8s}{'발생':>6s}{'발생률':>8s}"
+        f"{'A':>8s}{'B':>8s}{'B+':>8s}{'LDL단독':>9s}"
+    )
     for window in (3, 5, 7):
         for include_med, name in ((False, "LDL>=160 단독"), (True, "+약 시작")):
             d = label(fu, cohort, window, include_med)
             censored = len(cohort) - len(d)
             scores = [cv_auroc(d, fs)[0] for fs in (A_FEATURES, B_FEATURES, B_PLUS, ["LDLRESU0"])]
-            print(f"{window}년{'':4s}{name:20s}{len(d):>6d}{censored:>8d}{int(d.y.sum()):>6d}"
-                  f"{100 * d.y.mean():>7.1f}%" + "".join(f"{s:>8.3f}" for s in scores[:3])
-                  + f"{scores[3]:>9.3f}")
+            print(
+                f"{window}년{'':4s}{name:20s}{len(d):>6d}{censored:>8d}{int(d.y.sum()):>6d}"
+                f"{100 * d.y.mean():>7.1f}%" + "".join(f"{s:>8.3f}" for s in scores[:3]) + f"{scores[3]:>9.3f}"
+            )
 
 
 def bootstrap_gap(d: pd.DataFrame, n_boot: int = 2000) -> None:
@@ -206,9 +293,11 @@ def bootstrap_gap(d: pd.DataFrame, n_boot: int = 2000) -> None:
             diffs.append(roc_auc_score(y[idx], p_b[idx]) - roc_auc_score(y[idx], p_ldl[idx]))
     diffs = np.array(diffs)
     print(f"\n=== B(A+LDL) vs LDL 단독 (부트스트랩 {n_boot}회) ===")
-    print(f"  B={roc_auc_score(y, p_b):.3f}  LDL단독={roc_auc_score(y, p_ldl):.3f}  "
-          f"차이={diffs.mean():+.4f}  95% CI [{np.percentile(diffs, 2.5):+.4f}, "
-          f"{np.percentile(diffs, 97.5):+.4f}]")
+    print(
+        f"  B={roc_auc_score(y, p_b):.3f}  LDL단독={roc_auc_score(y, p_ldl):.3f}  "
+        f"차이={diffs.mean():+.4f}  95% CI [{np.percentile(diffs, 2.5):+.4f}, "
+        f"{np.percentile(diffs, 97.5):+.4f}]"
+    )
     return p_b
 
 
@@ -221,11 +310,21 @@ def report_risk_groups(d: pd.DataFrame, proba: np.ndarray) -> None:
     print(g.to_string())
 
     print("\n=== 예측확률 5분위별 실제 발생률 (보정 확인) ===")
-    t = pd.DataFrame({"q": pd.qcut(proba, 5, labels=["최저", "낮음", "중간", "높음", "최고"]),
-                      "y": d.y.astype(int).to_numpy(), "p": proba})
+    t = pd.DataFrame(
+        {
+            "q": pd.qcut(proba, 5, labels=["최저", "낮음", "중간", "높음", "최고"]),
+            "y": d.y.astype(int).to_numpy(),
+            "p": proba,
+        }
+    )
     out = t.groupby("q").agg(인원=("y", "size"), 예측평균=("p", "mean"), 실제발생률=("y", "mean"))
-    print((out.assign(예측평균=lambda x: (100 * x.예측평균).round(1),
-                      실제발생률=lambda x: (100 * x.실제발생률).round(1))).to_string())
+    print(
+        (
+            out.assign(
+                예측평균=lambda x: (100 * x.예측평균).round(1), 실제발생률=lambda x: (100 * x.실제발생률).round(1)
+            )
+        ).to_string()
+    )
 
 
 def main() -> None:
@@ -234,13 +333,16 @@ def main() -> None:
     cohort = build_cohort(baseline, followup)
     compare_windows(cohort, followup)
 
-    primary = label(followup, cohort, window=5, include_med=True)   # 권고안
-    print(f"\n[권고안: 5년 내 LDL>=160 또는 약 시작] n={len(primary)} "
-          f"발생={int(primary.y.sum())} ({100 * primary.y.mean():.1f}%)")
+    primary = label(followup, cohort, window=5, include_med=True)  # 권고안
+    print(
+        f"\n[권고안: 5년 내 LDL>=160 또는 약 시작] n={len(primary)} "
+        f"발생={int(primary.y.sum())} ({100 * primary.y.mean():.1f}%)"
+    )
     compare_models(primary)
     proba = bootstrap_gap(primary)
     report_risk_groups(primary, proba)
     performance_by_ldl(primary, proba)
+    performance_by_race(primary, proba)
     censoring_check(cohort, primary)
 
 
