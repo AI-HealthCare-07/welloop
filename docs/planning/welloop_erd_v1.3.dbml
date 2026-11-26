@@ -1,29 +1,32 @@
-// WELLOOP ERD v1.3 — 요구사항 정의서 v1.3 기준 (11/17 중간회의 반영)
-// v1.3: 프로그램 테이블 삭제(user_programs·program_challenges), 추천 카테고리(user_categories), 함께 관리 그룹(family_groups·group_members·share_settings·family_messages) 추가
+// WELLOOP ERD v2.0 — 요구사항 정의서 v2.0 기준 (11/25 중간회의 반영)
 // 원본(팀 초안) 형식 유지: enum + 한글 note, indexes로 PK 지정
-// 변경 요약: char(1) → bool, 체중·허리둘레 → decimal, 검진 항목 정리(간 수치 등 삭제),
-//          예측은 문진(questionnaires)에 연결 (v1.2 변경 내용)
 
 // ===== Enums =====
 
+/* V2 : 삭제(TODO : 여성만 쓸거여도 명목상 남길수는 있음)
 enum Gender {
   MALE [note: '남성']
   FEMALE [note: '여성']
 }
+*/
 
 enum Role {
   USER [note: '일반 회원']
   ADMIN [note: '관리자']
 }
 
+/* V2 : 삭제(TODO : 65세 큰 글씨 사용할것인가?)
 enum Font_size {
   NORMAL [note: '보통']
   BIG [note: '크게 (65세 이상 자동 적용)']
 }
+*/
 
 enum Consent_type {
   HEALTH_DATA [note: '건강정보(민감정보) 수집']
+  /* V2 : 가족 공유 기능 삭제로 인한 삭제
   FAMILY_SHARE [note: '함께 관리 그룹 공유']
+  */
   NOTIFICATION [note: '알림 수신']
 }
 
@@ -41,19 +44,32 @@ enum Yes_no_unknown {
 
 enum Menopause_status {
   PRE [note: '폐경 전']
+  /* V2 : 폐경 이행기, 폐경 후를 STRAW+10 기준 중 큰 범주인 초, 후기로 나눔
   PERI [note: '진행 중']
   POST [note: '폐경 후']
+  */
+  EARLY_PERI [note: '폐경 이행 초기']
+  LATE_PERI [note : "폐경 이행 후기"]
+  EARLY_POST [note: '폐경 후 초기']
+  LATE_POST [note : "폐경 후 후기"]
 }
 
 enum Disease_type {
+  /* V2 : 증상 삭제
   HYPERTENSION [note: '고혈압']
   DIABETES [note: '당뇨']
   DYSLIPIDEMIA [note: '이상지질혈증']
+  */
+  // V2 : 증상 추가(이후 증상 추가로 Disease_type을 남김)
+  HIGH_LDL [note : "고LDL콜레스테롤혈증"]
 }
 
 enum Risk_level {
+  // 화면 표시 : 양호
   LOW [note: '낮음']
+  // 화면 표시 : LDL 관리 필요
   WARNING [note: '주의']
+  // 화면 표시 : 검진 권장
   HIGH [note: '높음']
 }
 
@@ -62,30 +78,87 @@ enum Challenge_category {
   ACTIVITY [note: '신체활동']
   SLEEP_REST [note: '수면·휴식']
   SMOKE_DRINK [note: '금연·절주']
+  // V2 : 추가 카테고리
+  WEIGHT_WAIST [note : "체중, 복부비만"]
+  VITAMIND_OUTDOOR [note : "비타민D, 야외활동"]
 }
 
+/* V2 : 가족 공유 기능 삭제로 Relation 삭제
 enum Relation {
   SPOUSE [note: '부부·커플']
   PARENT_CHILD [note: '부모·자녀 (성인)']
   FAMILY [note: '가족']
 }
+*/
 
+/* V2 : 가족 공유 기능 삭제로 Relation 삭제
 enum Member_status {
   INVITED [note: '초대됨']
   ACCEPTED [note: '연결됨']
   LEFT [note: '연결 끊음']
 }
+*/
 
+/* V2 : 가족 공유 기능 삭제로 Relation 삭제
 enum Tone {
   WARM [note: '다정하게']
   PLAIN [note: '담백하게']
   LIGHT [note: '가볍게']
 }
+*/
 
 enum Intensity {
   LIGHT [note: '가벼움 (운동 제한 시에도 가능)']
   MODERATE [note: '보통']
   HARD [note: '강함 (운동 제한 시 제외)']
+}
+
+// V2 : 이하 추가 enum
+enum Model_type {
+  // 이하 가칭
+  MODEL_A [note : "LDL 미입력 예측 모델"]
+  MODEL_B [note : "LDL 입력 예측 모델"]
+  // AI 모델 적용 조건 미충족 대상
+  GENERAL [note : "일반 건강관리"]
+}
+
+enum Challenge_cycle {
+  DAILY [note : "일일 챌린지"]
+  WEEKLY [note : "주간 챌린지"]
+}
+
+enum Medication_type {
+  PRESCRIPTION [note : "기존 복용약/지질저하제"]
+  HORMONE [note : "호르몬제"]
+  SUPPLEMENT [note : "영양제"]
+}
+
+enum Notification_type {
+  CHALLENGE [note : "챌린지 독려"]
+  HEALTH [note : "건강 기록"]
+  WEEKLY_REPORT [note : "주간 리포트"]
+}
+
+enum Notification_frequency {
+  DAILY [note : "일일 알림"]
+  WEEKLY [note : "주간 알림"]
+  MONTHLY [note : "월간 알림"]
+  SPECIFIC_DAY [note : "특정 요일"]
+}
+
+enum Symptom_frequency {
+  NEVER [note : "없음"]
+  RARELY [note : "가끔(1~2회)"]
+  SOMETIMES [note : "자주(3~5회)"]
+  OFTEN [note : "매우 자주(6회 이상)"]
+}
+
+// V2 : symptom_scores에서 MRS 총점을 사용하지 않을 경우에 사용하는 enum
+enum Symptom_type {
+  OTHER [note : "기타 증상"]
+  HOT_FLASH [note : "안면홍조"]
+  NIGHT_SWEAT [note : "야간발한"]
+  SLEEP_DISTURBANCE [note : "수면장애"]
 }
 
 // ===== 회원 =====
@@ -96,9 +169,13 @@ Table users {
   password varchar [not null, note: '비밀번호 (bcrypt 해시)']
   name varchar [note: '이름']
   birth_date date [not null, note: '생년월일 (나이는 여기서 계산)']
+  /* V2 : 삭제(TODO : 여성만 쓸거여도 명목상 남길수는 있음)
   gender Gender [not null, note: '성별']
+  */
   role Role [not null, default: 'USER', note: '역할 (REQ-030)']
+  /* V2 : 삭제(TODO : 65세 큰 글씨 사용할것인가?)
   font_size Font_size [not null, default: 'NORMAL', note: '글자 크기']
+  */
   failed_login_count integer [not null, default: 0, note: '로그인 연속 실패 횟수']
   locked_until timestamp [note: '잠금 해제 시각 (5회 실패 시 10분, REQ-002)']
   is_deleted bool [not null, default: false, note: '탈퇴 여부 (건강 데이터는 실제 삭제, NFR-005)']
@@ -110,8 +187,30 @@ Table users {
   }
 }
 
+  // V2 : 알림 관련
+Table notification_settings {
+  user_id bigint [not null, note : "사용자 id"]
+  ntf_type Notification_type [not null, note : "알림 종류"]
+  ntf_enabled bool [not null, default : true, note : "알림 여부"]
+  ntf_time time [note : "알림 시간"]
+  ntf_frequency Notification_frequency [note : "알림 빈도"]
+  ntf_flg_sun bool [default : true, note : "일요일 알림"]
+  ntf_flg_mon bool [default : true, note : "월요일 알림"]
+  ntf_flg_tue bool [default : true, note : "화요일 알림"]
+  ntf_flg_wed bool [default : true, note : "수요일 알림"]
+  ntf_flg_thu bool [default : true, note : "목요일 알림"]
+  ntf_flg_fri bool [default : true, note : "금요일 알림"]
+  ntf_flg_sat bool [default : true, note : "토요일 알림"]
+
+  indexes {
+    (user_id, ntf_type) [pk]
+  }
+}
+
 Table consents {
+  /* 제안 : id보다는 user_id, consent_type, version을 pk로 지정
   id bigint [not null, note: 'consents TBL id']
+  */
   user_id bigint [not null, note: '사용자 id']
   consent_type Consent_type [not null, note: '동의 종류']
   version varchar [not null, note: '약관 버전']
@@ -119,7 +218,10 @@ Table consents {
   agreed_at timestamp [not null, note: '동의·철회 일시']
 
   indexes {
+    /* 제안 : PK 선언 변경
     (id) [pk]
+    */
+    (user_id, consent_type, version) [pk]
   }
 }
 
@@ -132,15 +234,22 @@ Table questionnaires {
   height decimal(4,1) [note: '키 cm']
   weight decimal(4,1) [note: '몸무게 kg']
   waist_size decimal(4,1) [note: '허리둘레 cm']
+  /* V2 : 삭제
   htn_diagnosed bool [note: '고혈압 진단 여부 (예측 입력 X, 관리 중 분기용)']
   htn_medication bool [note: '고혈압 약 복용']
   dm_diagnosed bool [note: '당뇨 진단 여부']
   dm_medication bool [note: '당뇨 약·인슐린']
+  */
   dl_diagnosed bool [note: '이상지질혈증 진단 여부']
   dl_medication bool [note: '이상지질혈증 약']
+  // V2 : 추가
+  high_ldl_diagnosed bool [note : "고LDL콜레스테롤혈증 진단 여부"]
+  lipid_lowering_med bool [default : false, note : "지질저하제 복용 여부"]
   // ② 생활습관
   smoking_status Smoking_status [note: '흡연 상태']
+  /* V2 : 삭제
   quit_intention bool [note: '금연 의향 (현재 흡연자만)']
+  */
   drinking_days_per_week integer [note: '음주 빈도 (주 며칠)']
   drinks_per_occasion integer [note: '1회 음주량 (잔)']
   activity_days_per_week integer [note: '신체활동 주 며칠']
@@ -154,18 +263,35 @@ Table questionnaires {
   breakfast_freq integer [note: '아침식사 빈도 (모델 입력)']
   sleep_hours decimal(3,1) [note: '평균 수면 시간']
   sleep_trouble bool [note: '수면 불편 여부']
+  // V2 : 추가
+  outdoor_activity_freq integer [note : "야외활동 빈도"]
+  fatty_meat_freq integer [note : "기름진 육류, 가공육 섭취 빈도 (모델 입력)"]
+  fried_fastfood_freq integer [note : "튀김, 패스트푸드, 과자류 섭취 빈도 (모델 입력)"]
+  milk_butter_freq integer [note : "고지방 유제품, 버터 섭취 빈도 (모델 입력)"]
+  fiber_freq integer [note : "식이섬유 섭취 빈도 (모델 입력)"]
+  fish_freq integer [note : "등푸른 생선 섭취 빈도 (모델 입력)"]
   // ③ 위험 요인
+  /* V2 : 삭제
   family_htn Yes_no_unknown [note: '가족력: 고혈압']
   family_dm Yes_no_unknown [note: '가족력: 당뇨']
+  */
   family_dl Yes_no_unknown [note: '가족력: 이상지질혈증']
   exercise_restricted bool [note: '의사의 운동 제한 여부']
   discomfort_symptoms varchar [note: '불편 증상 (가슴 통증·관절 통증 등)']
+  // V2 : 이하 추가 컬럼
   // ④ 맞춤 설정
   improvement_goal varchar [note: '생활습관 개선 목표']
   menopause_status Menopause_status [note: '폐경 상태 (여성만)']
   is_completed bool [not null, default: false, note: '작성 완료 여부 (중간 저장)']
   is_recheck bool [not null, default: false, note: '2주마다 1분 재문진 여부 (REQ-007)']
+  // ⑤ 수술
+  has_hysterectomy bool [not null, default : false, note : "자궁절제 여부"]
+  has_oophorectomy bool [not null, default : false, note : "난소절제 여부"]
+  surgery_date date [note : "수술 시기"]
+  on_hormone_therapy bool [not null, default : false, note : "호르몬 요법 여부"]
   created_at timestamp [not null, note: '작성 날짜']
+  // 중간 저장 -> 작성 완료 후 저장 때 사용
+  updated_at timestamp [note : "레코드 수정 날짜"]
 
   indexes {
     (id) [pk]
@@ -178,8 +304,10 @@ Table checkup_records {
   checkup_date date [note: '검진 받은 날 (1년 넘으면 재검진 안내)']
   pressure_systolic integer [note: '수축기 혈압']
   pressure_diastolic integer [note: '이완기 혈압']
+  /* V2 : 삭제(사용하려면 선택 입력)
   fasting_glucose integer [note: '공복혈당 mg/dL']
   hba1c decimal(3,1) [note: '당화혈색소 %']
+  */
   total_cholesterol integer [note: '총 콜레스테롤']
   ldl_cholesterol integer [note: 'LDL 콜레스테롤']
   hdl_cholesterol integer [note: 'HDL 콜레스테롤']
@@ -213,20 +341,34 @@ Table risk_predictions {
   id bigint [not null, note: 'risk_predictions TBL id']
   user_id bigint [not null, note: '사용자 id']
   questionnaire_id bigint [not null, note: '예측에 쓴 문진 id (검진 X — 라벨 누수 방지)']
+  /* V2 : 삭제(질환이 늘어나면 사용해도 되고)
   disease_type Disease_type [not null, note: '질환']
+  */
+  model_type Model_type [not null, note : "모델 종류"]
   model_version varchar [not null, note: '모델 버전 (예: htn-lgbm-v1)']
   risk_score decimal(5,4) [note: '위험 확률 0~1 (관리 중이면 null)']
   risk_level Risk_level [note: '위험도 단계 (관리 중이면 null)']
   is_managed bool [not null, default: false, note: '기진단 → 재예측 X, 생활습관 관리 평가(REQ-035)로']
+  /* v2 : shape_values로 대체
   major_factor1 varchar [note: '주요 원인1']
   major_factor2 varchar [note: '주요 원인2']
   major_factor3 varchar [note: '주요 원인3']
+  */
+  shap_values json [note : "SHAP 기반 주요 예측 요인, 변경 가능 여부"]
   input_snapshot json [note: '계산에 쓴 입력값 사본 (REQ-007)']
   created_at timestamp [not null, note: '예측 날짜 (하루 최대 1회)']
+  // V2 : 이하 추가 컬럼
+  // ldl을 사용한 예측 모델을 연결짓기 위한 컬럼
+  record_id bigint [null, note : "검진 기록 id(LDL미사용 모델의 경우 null)"]
+  is_eligible bool [not null, note : "모델 적용 조건 충족 여부"]
+  ineligible_reason varchar [note : "모델 적용 불가 사유"]
 
   indexes {
     (id) [pk]
+    /* V2 : 인덱스 변경
     (user_id, disease_type, created_at)
+    */
+    (user_id, created_at)
   }
 }
 
@@ -247,8 +389,12 @@ Table user_categories {
 
 Table challenges {
   challenge_id bigint [not null, note: 'challenges TBL id']
+  // V2 : 일간, 주간 구분 추가
+  challenge_cycle Challenge_cycle [not null, note : "챌린지 구분"]
   category Challenge_category [not null, note: '생활습관 카테고리']
   content varchar [not null, note: '챌린지 내용']
+  // V2 : 챌린지 항목 이름
+  target_item varchar [not null, note : "챌린지 항목"]
   intensity Intensity [not null, note: '강도']
   is_active bool [not null, default: true, note: '관리자 비활성화용 (REQ-031)']
   created_at timestamp [not null]
@@ -263,6 +409,13 @@ Table daily_challenges {
   id bigint [not null, note: 'daily_challenges TBL id']
   user_id bigint [not null, note: '사용자 id']
   challenge_id bigint [not null, note: '챌린지 id']
+  // V2 : 목표치 추가
+  challenge_cycle Challenge_cycle [not null, note : "챌린지 구분"]
+  target_value integer [not null, note : "목표치"]
+  complete_value integer [not null, note : "달성치"]
+  // <-
+  // V2 : challenge_id의 challenge_cycle이 주간일 경우
+  // 언제 로그인하던 그 주의 월요일을 지정
   assigned_date date [not null, note: '배정 날짜 (하루 최대 3개)']
   is_completed bool [not null, default: false, note: '완료 여부']
   completed_at timestamp [note: '완료 시각']
@@ -292,6 +445,7 @@ Table checkins {
   }
 }
 
+/* V2 : 삭제
 Table sos_logs {
   id bigint [not null, note: 'sos_logs TBL id']
   user_id bigint [not null, note: '사용자 id']
@@ -303,13 +457,41 @@ Table sos_logs {
     (id) [pk]
   }
 }
+*/
 
 Table symptom_scores {
   id bigint [not null, note: 'symptom_scores TBL id']
   user_id bigint [not null, note: '사용자 id (여성, 갱년기 프로그램)']
+  // V2 : 11문항 응답을 사용할건가? 아니면 삭제(11문항 이력은 남기지 않고 총점만 남긴다고 하면 사용)
   total_score integer [not null, note: 'MRS 총점']
+  // V2 : 공통 추가
+  recorded_date date [not null, note : "증상 기록일"]
+  /* V2 : 삭제
   answers json [note: '11문항 응답']
   created_at timestamp [not null, note: '기록일 (4주마다)']
+  */
+  // V2 : MRS 총점을 사용할 경우, 컬럼 추가
+  has_hot_flash bool [note : "안면홍조 발생 여부"]
+  hot_flash_freq Symptom_frequency [note : "안면홍조 발생 빈도"]
+  hot_flash_discomfort integer [note : "안면홍조 불편 정도"]
+  has_night_sweat bool [note : "야간발한 발생 여부"]
+  night_sweat_freq Symptom_frequency [note : "야간발한 발생 빈도"]
+  night_sweat_discomfort integer [note : "야간발한 불편 정도"]
+  has_sleep_disturbance bool [note : "수면장애 발생 여부"]
+  sleep_disturbance_freq Symptom_frequency [note : "수면장애 발생 빈도"]
+  sleep_disturbance_discomfort integer [note : "수면장애 불편 정도"]
+  other_symptoms varchar [note : "기타 동반 증상"]
+  memo text [note : "증상 관련 참고 메모"]
+  created_at timestamp [not null]
+  // V2 : MRS 총점을 사용하지 않을 경우, 컬럼 추가
+  /*
+  symptom_type Symptom_type [not null, note : "증상 종류"]
+  has_present bool [not null, note : "증상 발생 여부"]
+  frequency Symptom_frequency [note : "증상 발생 빈도"]
+  discomfort integer [note : "불편 정도"]
+  memo text [note : "증상 관련 참고 메모"]
+  create_at timestamp [not null]
+  */
 
   indexes {
     (id) [pk]
@@ -335,6 +517,7 @@ Table coach_messages {
 
 // ===== 함께 관리 그룹 (REQ-017·036, NFR-017) =====
 
+/* V2 : 삭제
 Table family_groups {
   id bigint [not null, note: 'family_groups TBL id']
   name varchar [not null, note: '그룹 이름 (직접 지정)']
@@ -346,7 +529,9 @@ Table family_groups {
     (id) [pk]
   }
 }
+*/
 
+/* V2 : 삭제
 Table group_members {
   group_id bigint [not null, note: '그룹 id']
   user_id bigint [not null, note: '사용자 id (성인만)']
@@ -357,7 +542,9 @@ Table group_members {
     (group_id, user_id) [pk]
   }
 }
+*/
 
+/* V2 : 삭제
 Table share_settings {
   group_id bigint [not null, note: '그룹 id']
   user_id bigint [not null, note: '공유하는 사람']
@@ -371,7 +558,9 @@ Table share_settings {
     (group_id, user_id) [pk]
   }
 }
+*/
 
+/* V2 : 삭제
 Table family_messages {
   id bigint [not null, note: 'family_messages TBL id']
   group_id bigint [not null, note: '그룹 id']
@@ -384,15 +573,20 @@ Table family_messages {
     (id) [pk]
   }
 }
+*/
 
 // ===== 관리자 =====
 
 Table safety_keywords {
   id bigint [not null, note: 'safety_keywords TBL id']
   keyword varchar [unique, not null, note: '금지어·위험 키워드']
+  /* V2 : 가족 문구 금지 삭제
   kind varchar [not null, note: '종류 (의료 표현 금지 / 위험 신호 / 가족 문구 금지)']
+  */
+  // 응급상황 키워드, 호르몬 요법/약물 처방/변경 권고 금지 추가
+  kind varchar [not null, note: '종류 (의료 표현 금지 / 위험 신호)']
   is_active bool [not null, default: true]
-  updated_by bigint [note: '수정한 관리자 id']
+  updated_by bigint [not null, note: '수정한 관리자 id']
   updated_at timestamp
 
   indexes {
@@ -418,7 +612,7 @@ Table risk_thresholds {
   warning_from decimal(5,4) [not null, note: '주의 시작 확률']
   high_from decimal(5,4) [not null, note: '높음 시작 확률']
   model_version varchar [not null, note: '적용 모델 버전']
-  updated_by bigint [note: '수정한 관리자 id']
+  updated_by bigint [not null, note: '수정한 관리자 id']
   updated_at timestamp
 
   indexes {
@@ -439,12 +633,15 @@ Ref: users.user_id < user_categories.user_id
 Ref: users.user_id < daily_challenges.user_id
 Ref: challenges.challenge_id < daily_challenges.challenge_id
 Ref: users.user_id < checkins.user_id
+/* V2 : 삭제
 Ref: users.user_id < sos_logs.user_id
+*/
 Ref: users.user_id < symptom_scores.user_id
 Ref: users.user_id < coach_messages.user_id
 Ref: users.user_id < safety_keywords.updated_by
 Ref: users.user_id < admin_logs.admin_id
 Ref: users.user_id < risk_thresholds.updated_by
+/* V2 : 삭제
 Ref: users.user_id < family_groups.created_by
 Ref: family_groups.id < group_members.group_id
 Ref: users.user_id < group_members.user_id
@@ -452,3 +649,8 @@ Ref: family_groups.id < share_settings.group_id
 Ref: users.user_id < share_settings.user_id
 Ref: family_groups.id < family_messages.group_id
 Ref: users.user_id < family_messages.sender_id
+*/
+
+// V2 : 수정 후 추가 관계
+Ref : users.user_id < notification_settings.user_id
+Ref : checkup_records.id ?<? risk_predictions.record_id
