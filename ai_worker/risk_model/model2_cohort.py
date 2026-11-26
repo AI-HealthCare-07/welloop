@@ -80,9 +80,24 @@ def read_visit(v: int) -> pd.DataFrame | None:
     out["age0"] = df.get(f"AGE{v}")
     out["status"] = df.get(f"STATUS{v}")
     out["ldl"] = df.get(f"LDLRESU{v}")
-    out["med"] = df.get(f"CHOLST1{v}") == 2
-    out["hyst"] = df[f"HYSTERE{v}"] == 2 if f"HYSTERE{v}" in df else False
-    out["hrt"] = (df[hrt] == 2).any(axis=1) if hrt else False
+
+    # 코드 2 = Yes. **결측은 False로 뭉개지 않고 결측으로 남긴다** — 모델 1의
+    # build_cohort와 같은 규칙이다. "실제 미복용·미사용·미수술"과 "상태 미확인"을
+    # 구분해야 하고, 미확인은 제외 단계에서 빠진다 (PR #49 리뷰 지적).
+    # 변수가 아예 없는 회차도 미확인으로 둔다. False로 두면 조건을 확인하지 않은
+    # 사람이 "조건 충족"으로 들어간다.
+    def flag(col: str) -> pd.Series:
+        if col not in df:
+            return pd.Series(pd.NA, index=df.index, dtype="object")
+        return (df[col] == 2).where(df[col].notna())
+
+    out["med"] = flag(f"CHOLST1{v}")
+    out["hyst"] = flag(f"HYSTERE{v}")
+    if hrt:
+        # 호르몬제는 변수가 여러 개다. 하나라도 '사용'이면 사용, 전부 결측이면 미확인.
+        out["hrt"] = (df[hrt] == 2).any(axis=1).where(df[hrt].notna().any(axis=1))
+    else:
+        out["hrt"] = pd.Series(pd.NA, index=df.index, dtype="object")
     return out
 
 
@@ -116,11 +131,12 @@ def index_cohort(visits: list[pd.DataFrame], stages: tuple[int, ...], name: str)
 
     print(f"\n### {name} — 제외 기준별 인원")
     print(f"  {'처음 들어선 여성':<28} {len(first):>5}")
+    # `== False`는 결측(미확인)을 함께 떨어뜨린다. 미복용과 미확인을 구분하기 위함이다.
     steps = [
         ("그 시점 LDL 측정됨", lambda d: d[d.ldl.notna()]),
-        ("지질강하제 미사용", lambda d: d[~d.med.astype(bool)]),
-        ("호르몬제 미사용", lambda d: d[~d.hrt.astype(bool)]),
-        ("자궁절제 없음", lambda d: d[~d.hyst.astype(bool)]),
+        ("지질강하제 미사용 확인됨", lambda d: d[d.med == False]),  # noqa: E712
+        ("호르몬제 미사용 확인됨", lambda d: d[d.hrt == False]),  # noqa: E712
+        ("자궁절제 없음 확인됨", lambda d: d[d.hyst == False]),  # noqa: E712
         ("LDL < 160 (위험 집단)", lambda d: d[d.ldl < 160]),
         ("출발점 나이 확인됨", lambda d: d[d.age0.notna()]),
     ]
